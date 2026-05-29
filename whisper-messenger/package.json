@@ -1,5 +1,5 @@
 {
-  "name": "whisper-server",
+  "name": "whisper-messenger",
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
@@ -17,5 +17,8 @@
     "express-rate-limit": "^7.1.4",
     "helmet": "^7.1.0",
     "cors": "^2.8.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
