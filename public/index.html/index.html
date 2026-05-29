@@ -2,53 +2,102 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>TEST</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test</title>
 </head>
-<body style="background: black; color: white; font-family: Arial; padding: 50px;">
-    <h1>TEST PAGE</h1>
-    <div id="status">Waiting...</div>
-    <div id="error" style="color: red;"></div>
+<body style="background: #000; color: #0f0; font-family: monospace; padding: 20px;">
+    <h1>Test Page</h1>
+    <div id="log"></div>
     
     <script>
-        // Проверяем что JS работает
-        document.getElementById('status').innerHTML = '✅ JavaScript работает<br>';
+        var logDiv = document.getElementById('log');
         
-        // Проверяем socket.io
-        try {
-            var script = document.createElement('script');
-            script.src = '/socket.io/socket.io.js';
-            script.onload = function() {
-                document.getElementById('status').innerHTML += '✅ Socket.io загружен<br>';
-                
-                if (typeof io !== 'undefined') {
-                    document.getElementById('status').innerHTML += '✅ io определён<br>';
-                    
-                    const socket = io();
-                    socket.on('connect', () => {
-                        document.getElementById('status').innerHTML += '✅ Подключено к серверу!<br>';
-                        document.getElementById('status').style.color = 'green';
-                    });
-                    
-                    socket.on('welcome', (msg) => {
-                        document.getElementById('status').innerHTML += '📩 ' + msg;
-                    });
-                    
-                    socket.on('connect_error', (err) => {
-                        document.getElementById('error').innerHTML += '❌ Ошибка подключения: ' + err.message;
-                    });
-                    
-                } else {
-                    document.getElementById('error').innerHTML = '❌ io не определён';
-                }
-            };
-            script.onerror = function() {
-                document.getElementById('error').innerHTML = '❌ Не удалось загрузить socket.io.js';
-            };
-            document.head.appendChild(script);
-            
-        } catch(e) {
-            document.getElementById('error').innerHTML = '❌ Ошибка: ' + e.message;
+        function addLog(msg, color) {
+            var p = document.createElement('p');
+            p.textContent = msg;
+            p.style.color = color || '#0f0';
+            logDiv.appendChild(p);
         }
+        
+        addLog('✅ HTML loaded', '#0f0');
+        addLog('✅ JavaScript running', '#0f0');
+        addLog('Window location: ' + window.location.href, '#fff');
+        
+        // Пробуем загрузить socket.io
+        addLog('Loading socket.io...', '#ff0');
+        
+        var script = document.createElement('script');
+        script.src = '/socket.io/socket.io.js';
+        
+        script.onload = function() {
+            addLog('✅ socket.io.js loaded successfully', '#0f0');
+            
+            if (typeof io !== 'undefined') {
+                addLog('✅ io object found', '#0f0');
+                
+                try {
+                    var socket = io();
+                    
+                    socket.on('connect', function() {
+                        addLog('✅ CONNECTED to server!', '#0f0');
+                        addLog('Socket ID: ' + socket.id, '#fff');
+                    });
+                    
+                    socket.on('welcome', function(msg) {
+                        addLog('📩 Server says: ' + msg, '#0f0');
+                    });
+                    
+                    socket.on('connect_error', function(err) {
+                        addLog('❌ Connection error: ' + err.message, '#f00');
+                    });
+                    
+                    socket.on('disconnect', function() {
+                        addLog('❌ Disconnected', '#f00');
+                    });
+                    
+                } catch(e) {
+                    addLog('❌ Error creating socket: ' + e.message, '#f00');
+                }
+            } else {
+                addLog('❌ io is undefined!', '#f00');
+            }
+        };
+        
+        script.onerror = function(e) {
+            addLog('❌ FAILED to load socket.io.js', '#f00');
+            addLog('Trying fetch check...', '#ff0');
+            
+            // Проверяем доступность ручным запросом
+            fetch('/socket.io/socket.io.js')
+                .then(function(r) {
+                    addLog('Fetch status: ' + r.status + ' ' + r.statusText, '#fff');
+                    return r.text();
+                })
+                .then(function(text) {
+                    addLog('Response length: ' + text.length, '#fff');
+                    if (text.length < 100) {
+                        addLog('Response: ' + text.substring(0, 100), '#f00');
+                    } else {
+                        addLog('✅ File exists but script tag failed to load it', '#ff0');
+                    }
+                })
+                .catch(function(err) {
+                    addLog('❌ Fetch failed: ' + err.message, '#f00');
+                });
+        };
+        
+        document.head.appendChild(script);
+        
+        // Также проверим /test
+        addLog('Testing /test endpoint...', '#ff0');
+        fetch('/test')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                addLog('✅ /test works: ' + JSON.stringify(data), '#0f0');
+            })
+            .catch(function(err) {
+                addLog('❌ /test failed: ' + err.message, '#f00');
+            });
     </script>
 </body>
 </html>
