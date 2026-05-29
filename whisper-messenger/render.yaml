@@ -1,14 +1,16 @@
 services:
-  # Backend Web Service
   - type: web
     name: whisper-messenger
     env: node
-    region: oregon  # или frankfurt
-    plan: free  # или starter, pro
+    region: oregon
+    plan: free
     branch: main
+    # Указываем корневую директорию
+    rootDir: server
+    # Путь для health check
+    healthCheckPath: /api/health
     buildCommand: npm install
     startCommand: node server.js
-    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
@@ -20,8 +22,8 @@ services:
         generateValue: true
       - key: DATABASE_PATH
         value: /var/data/whisper.db
-      - key: LOG_LEVEL
-        value: info
     autoDeploy: true
-    domains:
-      - whisper.yourdomain.com  # замени на свой домен
+    disk:
+      name: whisper-data
+      mountPath: /var/data
+      sizeGB: 1
