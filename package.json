@@ -1,17 +1,13 @@
 {
   "name": "securechat-e2ee",
   "version": "1.0.0",
-  "description": "Защищённый чат E2EE",
+  "description": "Защищённый чат с аккаунтами",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "socket.io": "^4.7.2",
-    "dotenv": "^16.3.1"
-  },
-  "engines": {
-    "node": "18.x"
+    "socket.io": "^4.7.2"
   }
 }
