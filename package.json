@@ -1,7 +1,7 @@
 {
   "name": "securechat-e2ee",
   "version": "1.0.0",
-  "description": "End-to-End Encrypted Chat",
+  "description": "Защищённый чат E2EE",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
