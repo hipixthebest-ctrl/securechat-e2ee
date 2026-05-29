@@ -33,6 +33,10 @@ try {
     }
     
     console.log('2. Setting up static files...');
+    // ДИАГНОСТИКА
+console.log('3. Client directory contents:', fs.readdirSync(clientDir));
+console.log('3. Index exists:', fs.existsSync(indexPath));
+console.log('3. Index size:', fs.statSync(indexPath).size, 'bytes');
     app.use(express.static(clientDir));
     
     console.log('3. Setting up routes...');
