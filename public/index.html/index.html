@@ -780,16 +780,32 @@ function init() {
 function connectSocket() {
     socket = io();
     
-    socket.on('connect', () => console.log('✅ Подключено'));
+    socket.on('connect', () => {
+        console.log('✅ Подключено к серверу');
+    });
 
-    socket.on('regError', (data) => showAuthError(data.message));
-    socket.on('authError', (data) => showAuthError(data.message));
+    // Регистрация
+    socket.on('regError', (data) => {
+        showAuthError(data.message);
+    });
+
+    socket.on('regSuccess', () => {
+        showAuthError('✅ Регистрация успешна! Теперь войдите.');
+        switchTab('login');
+    });
+
+    // Вход
+    socket.on('authError', (data) => {
+        showAuthError(data.message);
+    });
 
     socket.on('require2FA', (data) => {
         pending2FAUserId = data.userId;
         document.getElementById('2faEmail').textContent = data.email;
         document.getElementById('authModal').classList.remove('active');
         document.getElementById('2FAModal').classList.add('active');
+        document.getElementById('2faCode').value = '';
+        document.getElementById('2faCode').focus();
     });
 
     socket.on('2FAError', (data) => {
@@ -806,6 +822,8 @@ function connectSocket() {
         
         document.getElementById('authModal').classList.remove('active');
         document.getElementById('2FAModal').classList.remove('active');
+        document.getElementById('authError').style.display = 'none';
+        document.getElementById('2faError').style.display = 'none';
         
         allChats = data.chats || [];
         updateChatsList();
@@ -813,34 +831,88 @@ function connectSocket() {
         if (allChats.length > 0 && window.innerWidth >= 768) {
             switchChat(allChats[0].id, allChats[0].with, allChats[0].avatar, allChats[0].withId);
         }
+        
+        showToast('✅ Добро пожаловать, ' + data.username + '!');
     });
 
-    socket.on('searchResults', (results) => showSearchResults(results));
+    // Поиск пользователей
+    socket.on('searchResults', (results) => {
+        showSearchResults(results);
+    });
+
+    // Чаты
+    socket.on('chatCreated', (data) => {
+        allChats.push(data);
+        updateChatsList();
+        switchChat(data.id, data.with, data.avatar, data.withId);
+        document.getElementById('searchInput').value = '';
+        document.getElementById('searchResults').style.display = 'none';
+    });
 
     socket.on('chatMessages', (data) => {
-        if (data.chatId === currentChat) displayMessages(data.messages);
+        if (data.chatId === currentChat) {
+            displayMessages(data.messages);
+        }
     });
 
     socket.on('newMessage', (data) => {
+        // Обновляем превью чата в списке
         updateChatPreview(data, data.chatId !== currentChat);
+        
+        // Если это текущий открытый чат — показываем сообщение
         if (data.chatId === currentChat) {
             appendMessage(data.message);
             scrollToBottom();
         }
+        
+        // Если чата ещё нет в списке — добавляем
+        if (!allChats.find(c => c.id === data.chatId)) {
+            allChats.push({
+                id: data.chatId,
+                with: data.message.fromName,
+                withId: data.message.from,
+                avatar: null,
+                lastMessage: data.message.text || '📷 Фото',
+                unread: 0,
+                lastTime: data.message.time
+            });
+            updateChatsList();
+        }
     });
 
-    socket.on('onlineUsers', (users) => updateOnlineStatus(users));
+    socket.on('onlineUsers', (users) => {
+        updateOnlineStatus(users);
+    });
     
     socket.on('avatarUpdated', (data) => {
         if (currentUser && data.userId === currentUser.userId) {
+            currentUser.avatar = data.avatar;
             updateAvatarDisplay(data.avatar, currentUser.username);
         }
         updateChatsList();
     });
 
-    socket.on('emailUpdated', () => showToast('✅ Email обновлён'));
-    socket.on('2FAEnabled', () => showToast('✅ 2FA включена'));
-    socket.on('disconnect', () => console.log('❌ Отключено'));
+    socket.on('emailUpdated', (data) => {
+        if (currentUser) currentUser.email = data.email;
+        document.getElementById('profileEmail').textContent = data.email;
+        showToast('✅ Email обновлён');
+    });
+
+    socket.on('2FAEnabled', () => {
+        showToast('✅ 2FA включена');
+    });
+
+    socket.on('2FADisabled', () => {
+        showToast('ℹ️ 2FA отключена');
+    });
+
+    socket.on('disconnect', () => {
+        console.log('❌ Отключено от сервера');
+    });
+
+    socket.on('connect_error', () => {
+        console.log('❌ Ошибка подключения');
+    });
 }
 
 // ============================================
@@ -848,15 +920,26 @@ function connectSocket() {
 // ============================================
 function switchTab(tab) {
     document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
-    event.target.classList.add('active');
-    document.getElementById('loginForm').style.display = tab === 'login' ? 'block' : 'none';
-    document.getElementById('registerForm').style.display = tab === 'register' ? 'block' : 'none';
+    if (tab === 'login') {
+        document.querySelector('.tab-btn').classList.add('active');
+        document.getElementById('loginForm').style.display = 'block';
+        document.getElementById('registerForm').style.display = 'none';
+        document.getElementById('loginUsername').focus();
+    } else {
+        document.querySelectorAll('.tab-btn')[1].classList.add('active');
+        document.getElementById('loginForm').style.display = 'none';
+        document.getElementById('registerForm').style.display = 'block';
+        document.getElementById('regUsername').focus();
+    }
     hideAuthError();
+    document.getElementById('2faError').style.display = 'none';
 }
 
 function showAuthError(msg) {
-    document.getElementById('authError').textContent = msg;
-    document.getElementById('authError').style.display = 'block';
+    const el = document.getElementById('authError');
+    el.textContent = msg;
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 5000);
 }
 
 function hideAuthError() {
@@ -868,7 +951,9 @@ function login(e) {
     hideAuthError();
     const username = document.getElementById('loginUsername').value.trim();
     const password = document.getElementById('loginPassword').value;
-    if (!username || !password) return showAuthError('Заполните все поля');
+    if (!username || !password) {
+        return showAuthError('Заполните все поля');
+    }
     socket.emit('login', { username, password });
 }
 
@@ -878,15 +963,30 @@ function register(e) {
     const username = document.getElementById('regUsername').value.trim();
     const email = document.getElementById('regEmail').value.trim();
     const password = document.getElementById('regPassword').value;
-    if (!username || !email || !password) return showAuthError('Заполните все поля');
-    if (username.length < 3) return showAuthError('Имя минимум 3 символа');
-    if (password.length < 6) return showAuthError('Пароль минимум 6 символов');
+    
+    if (!username || !email || !password) {
+        return showAuthError('Заполните все поля');
+    }
+    if (username.length < 3) {
+        return showAuthError('Имя минимум 3 символа');
+    }
+    if (password.length < 6) {
+        return showAuthError('Пароль минимум 6 символов');
+    }
+    if (!email.includes('@') || !email.includes('.')) {
+        return showAuthError('Некорректный email');
+    }
+    
     socket.emit('register', { username, email, password });
 }
 
 function verify2FA() {
     const code = document.getElementById('2faCode').value.trim();
-    if (!code || code.length !== 6) return;
+    if (!code || code.length !== 6) {
+        document.getElementById('2faError').textContent = 'Введите 6-значный код';
+        document.getElementById('2faError').style.display = 'block';
+        return;
+    }
     socket.emit('verify2FA', { userId: pending2FAUserId, code });
 }
 
@@ -894,28 +994,90 @@ function logout() {
     currentUser = null;
     currentChat = null;
     allChats = [];
-    document.getElementById('chatsList').innerHTML = '<div style="padding:40px 20px;text-align:center;color:var(--text-secondary)">Войдите в аккаунт</div>';
+    
+    document.getElementById('chatsList').innerHTML = 
+        '<div style="padding:40px 20px;text-align:center;color:var(--text-secondary);font-size:.9rem">🔒 Войдите в аккаунт</div>';
     document.getElementById('chatHeader').style.display = 'none';
     document.getElementById('inputContainer').style.display = 'none';
-    document.getElementById('messagesContainer').innerHTML = '<div class="empty-chat"><div><h2>💬 SecureChat</h2></div></div>';
+    document.getElementById('messagesContainer').innerHTML = 
+        '<div class="empty-chat"><div><h2>💬 SecureChat</h2><p>Безопасное общение</p></div></div>';
+    document.getElementById('myName').textContent = 'Гость';
+    document.getElementById('myAvatar').innerHTML = '';
     document.getElementById('authModal').classList.add('active');
     document.getElementById('settingsPage').classList.remove('active');
+    document.getElementById('sidebar').classList.remove('hidden');
+    
     socket.emit('logout');
+    showToast('👋 Вы вышли');
 }
 
 // ============================================
 // ЧАТЫ
 // ============================================
+function updateChatsList() {
+    const container = document.getElementById('chatsList');
+    
+    if (!allChats.length) {
+        container.innerHTML = 
+            '<div style="padding:40px 20px;text-align:center;color:var(--text-secondary);font-size:.9rem">🔍 Найдите пользователя чтобы начать чат</div>';
+        return;
+    }
+    
+    container.innerHTML = allChats.map(chat => {
+        const time = chat.lastTime ? new Date(chat.lastTime).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'}) : '';
+        const avatar = chat.avatar ? 
+            `<img src="${chat.avatar}" style="width:100%;height:100%;object-fit:cover">` : 
+            chat.with.charAt(0).toUpperCase();
+        const unreadBadge = chat.unread ? `<span class="unread-badge">${chat.unread}</span>` : '';
+        
+        return `
+        <div class="chat-item" data-chat-id="${chat.id}" onclick="switchChat('${chat.id}', '${chat.with}', '${chat.avatar || ''}', '${chat.withId}')">
+            <div class="chat-item-avatar">${avatar}</div>
+            <div class="chat-item-info">
+                <div class="chat-item-header">
+                    <span class="chat-item-name">${chat.with}</span>
+                    <span class="chat-item-time">${time}</span>
+                </div>
+                <div class="chat-item-preview">
+                    ${chat.lastMessage || 'Нет сообщений'}${unreadBadge}
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function updateChatPreview(data, isNotCurrent) {
+    const chatIndex = allChats.findIndex(c => c.id === data.chatId);
+    if (chatIndex >= 0) {
+        allChats[chatIndex].lastMessage = data.message.text || '📷 Фото';
+        allChats[chatIndex].lastTime = data.message.time;
+        if (isNotCurrent) {
+            allChats[chatIndex].unread = (allChats[chatIndex].unread || 0) + 1;
+        }
+    }
+    updateChatsList();
+}
+
 function switchChat(chatId, peerName, peerAvatar, peerId) {
     currentChat = chatId;
+    
     document.getElementById('chatHeader').style.display = 'flex';
     document.getElementById('chatName').textContent = peerName;
     document.getElementById('chatStatus').textContent = '';
     document.getElementById('chatAvatar').innerHTML = peerAvatar ? 
-        '<img src="' + peerAvatar + '">' : peerName.charAt(0).toUpperCase();
+        `<img src="${peerAvatar}" style="width:100%;height:100%;object-fit:cover">` : 
+        peerName.charAt(0).toUpperCase();
     document.getElementById('inputContainer').style.display = 'flex';
-    document.getElementById('messagesContainer').innerHTML = '<div class="empty-chat"><div>Загрузка...</div></div>';
+    document.getElementById('messagesContainer').innerHTML = 
+        '<div class="empty-chat"><div>⏳ Загрузка...</div></div>';
     document.getElementById('messageInput').focus();
+    
+    // Обнуляем unread
+    const chatIndex = allChats.findIndex(c => c.id === chatId);
+    if (chatIndex >= 0) {
+        allChats[chatIndex].unread = 0;
+        updateChatsList();
+    }
     
     // На мобилке прячем сайдбар
     if (window.innerWidth <= 768) {
@@ -934,37 +1096,52 @@ function closeChat() {
     currentChat = null;
     document.getElementById('chatHeader').style.display = 'none';
     document.getElementById('inputContainer').style.display = 'none';
-    document.getElementById('messagesContainer').innerHTML = '<div class="empty-chat"><div><h2>💬 SecureChat</h2></div></div>';
+    document.getElementById('messagesContainer').innerHTML = 
+        '<div class="empty-chat"><div><h2>💬 SecureChat</h2><p>Безопасное общение</p></div></div>';
     document.getElementById('sidebar').classList.remove('hidden');
+    document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
 }
 
 function startChat(userId, username, avatar) {
-    const chatId = [currentUser.userId, userId].sort().join('_');
-    // Проверяем, есть ли уже такой чат
-    const existing = allChats.find(c => c.id === chatId);
-    if (existing) {
-        switchChat(existing.id, existing.with, existing.avatar, existing.withId);
-    } else {
-        switchChat(chatId, username, avatar, userId);
+    if (!currentUser) {
+        showToast('⚠️ Сначала войдите');
+        return;
     }
+    if (userId === currentUser.userId) {
+        showToast('⚠️ Нельзя чатиться с собой');
+        return;
+    }
+    socket.emit('startChat', { userId, username, avatar });
     document.getElementById('searchInput').value = '';
     document.getElementById('searchResults').style.display = 'none';
+}
+
+function updateOnlineStatus(users) {
+    if (currentChat) {
+        const peerId = currentChat.split('_').find(id => id !== currentUser.userId);
+        const isOnline = users.includes(peerId);
+        document.getElementById('chatStatus').textContent = isOnline ? '🟢 Онлайн' : '⚫️ Оффлайн';
+        document.getElementById('chatStatus').style.color = isOnline ? '#30d158' : 'var(--text-secondary)';
+    }
 }
 
 // ============================================
 // СООБЩЕНИЯ
 // ============================================
 function sendMessage() {
-    if (!currentChat) return;
+    if (!currentChat || !currentUser) return;
     const text = document.getElementById('messageInput').value.trim();
     if (!text) return;
     
     socket.emit('sendMessage', { chatId: currentChat, text });
     document.getElementById('messageInput').value = '';
+    document.getElementById('messageInput').focus();
 }
 
 function sendImage(input) {
-    if (!currentChat || !input.files[0]) return;
+    if (!currentChat || !currentUser) return;
+    if (!input.files[0]) return;
+    
     const reader = new FileReader();
     reader.onload = (e) => {
         socket.emit('sendImage', { chatId: currentChat, image: e.target.result });
@@ -975,29 +1152,35 @@ function sendImage(input) {
 
 function displayMessages(messages) {
     if (!messages.length) {
-        document.getElementById('messagesContainer').innerHTML = '<div class="empty-chat"><div>Нет сообщений</div></div>';
+        document.getElementById('messagesContainer').innerHTML = 
+            '<div class="empty-chat"><div><p>💬 Напишите первое сообщение</p></div></div>';
         return;
     }
     
     let html = '';
     let lastDate = '';
     
-    messages.forEach((msg, i) => {
-        const date = new Date(msg.time).toLocaleDateString('ru-RU');
+    messages.forEach((msg) => {
+        const date = new Date(msg.time).toLocaleDateString('ru-RU', {
+            weekday: 'short', day: 'numeric', month: 'long'
+        });
         if (date !== lastDate) {
             html += `<div class="date-separator">${date}</div>`;
             lastDate = date;
         }
         
         const isOwn = msg.from === currentUser.userId;
+        
         html += `
         <div class="message-row ${isOwn ? 'own' : 'other'}">
-            ${isOwn ? '' : `<div class="message-avatar">${msg.fromName.charAt(0).toUpperCase()}</div>`}
+            ${isOwn ? '' : `<div class="message-avatar">${msg.fromName ? msg.fromName.charAt(0).toUpperCase() : '?'}</div>`}
             <div>
                 <div class="message-bubble">
-                    ${msg.image ? `<img src="${msg.image}" class="message-image" onclick="openImage('${msg.image}')">` : msg.text}
+                    ${msg.image ? 
+                        `<img src="${msg.image}" class="message-image" onclick="openImage('${msg.image}')" style="max-width:200px;border-radius:12px;cursor:pointer">` : 
+                        msg.text}
                 </div>
-                <div class="message-time">${new Date(msg.time).toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit'})}</div>
+                <div class="message-time">${new Date(msg.time).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'})}</div>
             </div>
         </div>`;
     });
@@ -1008,17 +1191,24 @@ function displayMessages(messages) {
 
 function appendMessage(msg) {
     const container = document.getElementById('messagesContainer');
+    
+    // Убираем "загрузку" если есть
+    const loader = container.querySelector('.empty-chat');
+    if (loader) loader.remove();
+    
     const isOwn = msg.from === currentUser.userId;
     
     const div = document.createElement('div');
     div.className = `message-row ${isOwn ? 'own' : 'other'}`;
     div.innerHTML = `
-        ${isOwn ? '' : `<div class="message-avatar">${msg.fromName.charAt(0).toUpperCase()}</div>`}
+        ${isOwn ? '' : `<div class="message-avatar">${msg.fromName ? msg.fromName.charAt(0).toUpperCase() : '?'}</div>`}
         <div>
             <div class="message-bubble">
-                ${msg.image ? `<img src="${msg.image}" class="message-image" onclick="openImage('${msg.image}')">` : msg.text}
+                ${msg.image ? 
+                    `<img src="${msg.image}" class="message-image" onclick="openImage('${msg.image}')" style="max-width:200px;border-radius:12px;cursor:pointer">` : 
+                    msg.text}
             </div>
-            <div class="message-time">${new Date(msg.time).toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit'})}</div>
+            <div class="message-time">${new Date(msg.time).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'})}</div>
         </div>`;
     
     container.appendChild(div);
@@ -1036,11 +1226,17 @@ function scrollToBottom() {
 }
 
 // ============================================
-// ПОИСК
+// ПОИСК ПОЛЬЗОВАТЕЛЕЙ
 // ============================================
 function searchUsers(query) {
     if (!query || query.length < 1) {
         document.getElementById('searchResults').style.display = 'none';
+        return;
+    }
+    if (!currentUser) {
+        document.getElementById('searchResults').innerHTML = 
+            '<div style="padding:16px;color:var(--red);text-align:center">⚠️ Сначала войдите</div>';
+        document.getElementById('searchResults').style.display = 'block';
         return;
     }
     socket.emit('searchUsers', query);
@@ -1049,6 +1245,141 @@ function searchUsers(query) {
 function showSearchResults(users) {
     const container = document.getElementById('searchResults');
     if (!users.length) {
-        container.innerHTML = '<div style="padding:16px;color:var(--text-secondary)">Никого не найдено</div>';
+        container.innerHTML = 
+            '<div style="padding:16px;color:var(--text-secondary);text-align:center">🔍 Никого не найдено</div>';
+    } else {
+        container.innerHTML = users.map(u => `
+            <div class="search-result-item" onclick="startChat('${u.userId}', '${u.username}', '${u.avatar || ''}')">
+                <div class="chat-item-avatar" style="width:40px;height:40px;font-size:16px">
+                    ${u.avatar ? `<img src="${u.avatar}" style="width:100%;height:100%;object-fit:cover">` : u.username.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                    <div style="font-weight:600">${u.username}</div>
+                    <div style="font-size:12px;color:var(--text-secondary)">${u.email || ''}</div>
+                </div>
+            </div>
+        `).join('');
+    }
+    container.style.display = 'block';
+}
+
+// Закрываем результаты поиска при клике вне
+document.addEventListener('click', (e) => {
+    const searchBox = document.querySelector('.search-box');
+    if (searchBox && !searchBox.contains(e.target)) {
+        document.getElementById('searchResults').style.display = 'none';
+    }
+});
+
+// ============================================
+// НАСТРОЙКИ
+// ============================================
+function openSettings() {
+    if (!currentUser) {
+        document.getElementById('authModal').classList.add('active');
+        return;
+    }
+    document.getElementById('settingsPage').classList.add('active');
+    document.getElementById('profileAvatar').innerHTML = currentUser.avatar ? 
+        `<img src="${currentUser.avatar}" style="width:100%;height:100%;object-fit:cover">` : 
+        currentUser.username.charAt(0).toUpperCase();
+    
+    // Обновляем состояние тогглов
+    if (localStorage.getItem('theme') === 'light') {
+        document.getElementById('themeToggle').classList.remove('active');
+    } else {
+        document.getElementById('themeToggle').classList.add('active');
+    }
+    
+    if (Notification.permission === 'granted') {
+        document.getElementById('notifToggle').classList.add('active');
+    } else {
+        document.getElementById('notifToggle').classList.remove('active');
+    }
+}
+
+function closeSettings() {
+    document.getElementById('settingsPage').classList.remove('active');
+}
+
+function toggleTheme() {
+    document.body.classList.toggle('light');
+    const isLight = document.body.classList.contains('light');
+    localStorage.setItem('theme', isLight ? 'light' : 'dark');
+    document.getElementById('themeToggle').classList.toggle('active', !isLight);
+}
+
+function requestNotificationPermission() {
+    if (!('Notification' in window)) {
+        showToast('⚠️ Уведомления не поддерживаются');
+        return;
+    }
+    
+    if (Notification.permission === 'granted') {
+        showToast('✅ Уведомления уже включены');
+        document.getElementById('notifToggle').classList.add('active');
+        return;
+    }
+    
+    Notification.requestPermission().then(permission => {
+        if (permission === 'granted') {
+            document.getElementById('notifToggle').classList.add('active');
+            showToast('✅ Уведомления включены');
+            new Notification('SecureChat', { body: 'Уведомления работают! 🔔' });
+        } else {
+            document.getElementById('notifToggle').classList.remove('active');
+            showToast('❌ Уведомления отклонены');
+        }
+    });
+}
+
+function uploadAvatar(input) {
+    if (!input.files[0] || !currentUser) return;
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        socket.emit('updateAvatar', { avatar: e.target.result });
+        showToast('📷 Аватар обновлён');
+    };
+    reader.readAsDataURL(input.files[0]);
+    input.value = '';
+}
+
+function enable2FA() {
+    if (!currentUser) return;
+    socket.emit('enable2FA');
+}
+
+function disable2FA() {
+    if (!currentUser) return;
+    socket.emit('disable2FA');
+}
+
+// ============================================
+// ВСПОМОГАТЕЛЬНЫЕ
+// ============================================
+function updateAvatarDisplay(avatar, username) {
+    const avatarHTML = avatar ? 
+        `<img src="${avatar}" style="width:100%;height:100%;object-fit:cover">` : 
+        username.charAt(0).toUpperCase();
+    
+    document.getElementById('myAvatar').innerHTML = avatarHTML;
+    document.getElementById('profileAvatar').innerHTML = avatarHTML;
+}
+
+function showToast(message) {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.classList.add('show');
+    clearTimeout(toast._timeout);
+    toast._timeout = setTimeout(() => {
+        toast.classList.remove('show');
+    }, 2500);
+}
+
+// ============================================
+// ЗАПУСК
+// ============================================
+window.addEventListener('DOMContentLoaded', init);
     } else {
         container.innerHTML = users.map(u => `
