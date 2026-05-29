@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SecureChat E2EE</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .container {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        h1 {
+            font-size: 3em;
+            margin: 0;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        .status {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 20px;
+            border-radius: 15px;
+            margin: 20px 0;
+        }
+        .connected {
+            color: #4ade80;
+            font-weight: bold;
+        }
+        .emoji {
+            font-size: 4em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="emoji">🔒</div>
+        <h1>SecureChat</h1>
+        <h2>End-to-End Encrypted</h2>
+        <div class="status">
+            <p>Server Status: <span class="connected">Online ✅</span></p>
+            <p id="socket-status">Connecting to server...</p>
+            <p>Port: 3000</p>
+        </div>
+        <p>Your secure messaging platform is ready!</p>
+        <p style="font-size: 0.8em; opacity: 0.7;">No messages are stored on server</p>
+        <p style="font-size: 0.8em; opacity: 0.7;">End-to-end encryption enabled</p>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const statusEl = document.getElementById('socket-status');
+        
+        socket.on('connect', () => {
+            statusEl.innerHTML = 'Socket: <span class="connected">Connected ✅</span>';
+            console.log('Connected to server');
+        });
+        
+        socket.on('disconnect', () => {
+            statusEl.innerHTML = 'Socket: <span style="color: #ff6b6b;">Disconnected ❌</span>';
+        });
+    </script>
+</body>
+</html>
