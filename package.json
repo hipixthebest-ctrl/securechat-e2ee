@@ -1,5 +1,5 @@
 {
-  "name": "test-chat",
+  "name": "securechat",
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
