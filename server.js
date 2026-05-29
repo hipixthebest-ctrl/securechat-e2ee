@@ -27,7 +27,7 @@ const htmlContent = `<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🔒 SecureChat - Аккаунты и ЛС</title>
+    <title>SecureChat - Аккаунты и ЛС</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -36,7 +36,6 @@ const htmlContent = `<!DOCTYPE html>
             height: 100vh;
         }
 
-        /* ===== ЭКРАНЫ АВТОРИЗАЦИИ ===== */
         .auth-screen {
             display: flex;
             justify-content: center;
@@ -108,7 +107,6 @@ const htmlContent = `<!DOCTYPE html>
             font-size: 0.9rem;
         }
 
-        /* ===== ИНТЕРФЕЙС ЧАТА ===== */
         .app-container {
             max-width: 1200px;
             height: 90vh;
@@ -334,7 +332,7 @@ const htmlContent = `<!DOCTYPE html>
     <!-- ЭКРАН ВХОДА -->
     <div id="loginScreen" class="auth-screen">
         <div class="auth-box">
-            <h2>🔒 SecureChat</h2>
+            <h2>SecureChat</h2>
             <p>Войдите в аккаунт</p>
             <input type="text" id="loginUsername" class="auth-input" placeholder="Имя пользователя" maxlength="20">
             <input type="password" id="loginPassword" class="auth-input" placeholder="Пароль">
@@ -347,7 +345,7 @@ const htmlContent = `<!DOCTYPE html>
     <!-- ЭКРАН РЕГИСТРАЦИИ -->
     <div id="registerScreen" class="auth-screen" style="display: none;">
         <div class="auth-box">
-            <h2>📝 Регистрация</h2>
+            <h2>Регистрация</h2>
             <p>Создайте новый аккаунт</p>
             <input type="text" id="regUsername" class="auth-input" placeholder="Имя пользователя" maxlength="20">
             <input type="password" id="regPassword" class="auth-input" placeholder="Пароль">
@@ -363,11 +361,11 @@ const htmlContent = `<!DOCTYPE html>
         <div class="sidebar">
             <div class="sidebar-header">
                 <div class="user-info">
-                    <h2>💬 Чаты</h2>
+                    <h2>Чаты</h2>
                     <button class="logout-btn" onclick="logout()">Выйти</button>
                 </div>
                 <div id="currentUsername" style="font-size: 0.9rem; opacity: 0.9;"></div>
-                <input type="text" id="searchUser" placeholder="🔍 Поиск пользователя..." onkeyup="filterUsers()" style="margin-top: 10px;">
+                <input type="text" id="searchUser" placeholder="Поиск пользователя..." onkeyup="filterUsers()" style="margin-top: 10px;">
             </div>
             <div class="chats-list" id="chatsList"></div>
             <div class="users-section">
@@ -381,11 +379,11 @@ const htmlContent = `<!DOCTYPE html>
                 <h3 id="chatTitle">Выберите чат</h3>
             </div>
             <div class="messages-container" id="messagesContainer">
-                <div class="no-chat">👈 Выберите пользователя для начала переписки</div>
+                <div class="no-chat">Выберите пользователя для начала переписки</div>
             </div>
             <div class="input-container" id="inputContainer" style="display: none;">
                 <input type="text" id="messageInput" placeholder="Введите сообщение..." maxlength="500">
-                <button id="sendButton" onclick="sendMessage()">📤</button>
+                <button id="sendButton" onclick="sendMessage()">Отправить</button>
             </div>
         </div>
     </div>
@@ -398,7 +396,6 @@ const htmlContent = `<!DOCTYPE html>
         let allChats = [];
         let onlineUsersList = [];
 
-        // ===== АВТОРИЗАЦИЯ =====
         function showRegister() {
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('registerScreen').style.display = 'flex';
@@ -467,18 +464,16 @@ const htmlContent = `<!DOCTYPE html>
             document.getElementById('loginPassword').value = '';
         }
 
-        // ===== ПОДКЛЮЧЕНИЕ =====
         function connectSocket() {
             socket = io();
 
             socket.on('authSuccess', (data) => {
                 currentUser = data;
-                document.getElementById('currentUsername').textContent = '👤 ' + data.username;
+                document.getElementById('currentUsername').textContent = 'User: ' + data.username;
                 document.getElementById('loginScreen').style.display = 'none';
                 document.getElementById('registerScreen').style.display = 'none';
                 document.getElementById('chatScreen').style.display = 'flex';
 
-                // Загружаем чаты
                 allChats = data.chats || [];
                 updateChatsList();
             });
@@ -490,7 +485,7 @@ const htmlContent = `<!DOCTYPE html>
             socket.on('regSuccess', () => {
                 showLogin();
                 document.getElementById('loginUsername').value = document.getElementById('regUsername').value;
-                alert('✅ Аккаунт создан! Теперь войдите.');
+                alert('Аккаунт создан! Теперь войдите.');
             });
 
             socket.on('regError', (data) => {
@@ -516,7 +511,6 @@ const htmlContent = `<!DOCTYPE html>
             });
         }
 
-        // ===== ЧАТЫ =====
         function filterUsers() {
             const searchTerm = document.getElementById('searchUser')?.value?.toLowerCase() || '';
             const usersList = document.getElementById('usersList');
@@ -525,19 +519,17 @@ const htmlContent = `<!DOCTYPE html>
             onlineUsersList
                 .filter(u => u.username.toLowerCase().includes(searchTerm))
                 .forEach(user => {
-                    html += \`
-                        <div class="online-user" onclick="startChat('\${user.userId}', '\${user.username}')">
-                            <span class="online-dot"></span>
-                            <span>\${escapeHtml(user.username)}</span>
-                        </div>
-                    \`;
+                    html += '<div class="online-user" onclick="startChat(\'' + user.userId + '\', \'' + escapeHtml(user.username) + '\')">' +
+                        '<span class="online-dot"></span>' +
+                        '<span>' + escapeHtml(user.username) + '</span>' +
+                    '</div>';
                 });
             usersList.innerHTML = html || '<div style="padding: 10px; color: #999; font-size: 0.9rem;">Нет пользователей</div>';
         }
 
         function startChat(peerId, peerName) {
             currentChat = peerId;
-            document.getElementById('chatTitle').textContent = '💬 ' + peerName;
+            document.getElementById('chatTitle').textContent = 'Chat: ' + peerName;
             document.getElementById('inputContainer').style.display = 'flex';
             document.getElementById('messagesContainer').innerHTML = '';
             
@@ -547,7 +539,7 @@ const htmlContent = `<!DOCTYPE html>
 
         function switchChat(chatId, peerName) {
             currentChat = chatId;
-            document.getElementById('chatTitle').textContent = '💬 ' + peerName;
+            document.getElementById('chatTitle').textContent = 'Chat: ' + peerName;
             document.getElementById('inputContainer').style.display = 'flex';
             document.getElementById('messagesContainer').innerHTML = '';
             
@@ -586,10 +578,8 @@ const htmlContent = `<!DOCTYPE html>
                 minute: '2-digit'
             });
 
-            div.innerHTML = \`
-                <div class="message-info">\${time}</div>
-                <div class="message-bubble">\${escapeHtml(msg.text)}</div>
-            \`;
+            div.innerHTML = '<div class="message-info">' + time + '</div>' +
+                '<div class="message-bubble">' + escapeHtml(msg.text) + '</div>';
 
             container.appendChild(div);
             container.scrollTop = container.scrollHeight;
@@ -613,13 +603,11 @@ const htmlContent = `<!DOCTYPE html>
             
             allChats.forEach(chat => {
                 const timeStr = chat.lastTime ? new Date(chat.lastTime).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '';
-                html += \`
-                    <div class="chat-item \${currentChat === chat.id ? 'active' : ''}" onclick="switchChat('\${chat.id}', '\${chat.with}')">
-                        <div class="chat-item-name">\${escapeHtml(chat.with)}</div>
-                        <div class="chat-item-last">\${escapeHtml(chat.lastMessage || 'Нет сообщений')}</div>
-                        <div class="chat-item-time">\${timeStr}</div>
-                    </div>
-                \`;
+                html += '<div class="chat-item ' + (currentChat === chat.id ? 'active' : '') + '" onclick="switchChat(\'' + chat.id + '\', \'' + escapeHtml(chat.with) + '\')">' +
+                    '<div class="chat-item-name">' + escapeHtml(chat.with) + '</div>' +
+                    '<div class="chat-item-last">' + escapeHtml(chat.lastMessage || 'Нет сообщений') + '</div>' +
+                    '<div class="chat-item-time">' + timeStr + '</div>' +
+                '</div>';
             });
             
             chatsList.innerHTML = html || '<div style="padding: 20px; text-align: center; color: #999;">У вас пока нет чатов</div>';
@@ -631,28 +619,25 @@ const htmlContent = `<!DOCTYPE html>
             return div.innerHTML;
         }
 
-        // ===== ИНИЦИАЛИЗАЦИЯ =====
         connectSocket();
 
-        document.addEventListener('DOMContentLoaded', () => {
-            document.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    if (document.getElementById('loginScreen').style.display !== 'none' && document.getElementById('loginScreen').style.display !== 'none') {
-                        login();
-                    } else if (document.getElementById('registerScreen').style.display === 'flex') {
-                        register();
-                    } else if (document.getElementById('chatScreen').style.display === 'flex') {
-                        sendMessage();
-                    }
+        document.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                if (document.getElementById('loginScreen').style.display === 'flex') {
+                    login();
+                } else if (document.getElementById('registerScreen').style.display === 'flex') {
+                    register();
+                } else if (document.getElementById('chatScreen').style.display === 'flex') {
+                    sendMessage();
                 }
-            });
+            }
         });
     </script>
 </body>
 </html>`;
 
 fs.writeFileSync(indexPath, htmlContent, 'utf8');
-console.log('✅ HTML создан с системой аккаунтов');
+console.log('HTML создан с системой аккаунтов');
 
 app.use(express.static(clientDir));
 app.get('/', (req, res) => {
@@ -661,7 +646,7 @@ app.get('/', (req, res) => {
 
 // ============ СОКЕТ ЛОГИКА ============
 io.on('connection', (socket) => {
-    console.log('🔌 Новое подключение');
+    console.log('Новое подключение');
 
     // === РЕГИСТРАЦИЯ ===
     socket.on('register', (data) => {
@@ -683,7 +668,7 @@ io.on('connection', (socket) => {
             chats: new Map()
         });
 
-        console.log(\`✅ Зарегистрирован: \${username}\`);
+        console.log('Зарегистрирован: ' + username);
         socket.emit('regSuccess');
     });
 
@@ -730,8 +715,8 @@ io.on('connection', (socket) => {
             userChats.push({
                 id: chatId,
                 with: peerAccount ? peerAccount.username : 'Неизвестный',
-                lastMessage: lastMsg?.text || '',
-                lastTime: lastMsg?.timestamp || 0
+                lastMessage: lastMsg ? lastMsg.text : '',
+                lastTime: lastMsg ? lastMsg.timestamp : 0
             });
         });
 
@@ -741,9 +726,8 @@ io.on('connection', (socket) => {
             chats: userChats.sort((a, b) => (b.lastTime || 0) - (a.lastTime || 0))
         });
 
-        // Уведомляем всех о новом онлайне
         broadcastOnlineUsers();
-        console.log(\`👤 \${username} вошёл в систему\`);
+        console.log(username + ' вошёл в систему');
     });
 
     // === ПОЛУЧИТЬ ЧАТ ===
@@ -816,7 +800,7 @@ io.on('connection', (socket) => {
         if (socket.userId) {
             onlineUsers.delete(socket.userId);
             broadcastOnlineUsers();
-            console.log(\`👋 \${socket.username} вышел\`);
+            console.log(socket.username + ' вышел');
         }
     });
 
@@ -846,6 +830,7 @@ function broadcastOnlineUsers() {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(\`✅ Сервер с аккаунтами запущен на порту \${PORT}\`);
-    console.log('🔐 Функции: Регистрация, Вход, История чатов, Личные сообщения');
+    console.log('Сервер с аккаунтами запущен на порту ' + PORT);
+    console.log('Функции: Регистрация, Вход, История чатов, Личные сообщения');
+});
 });
