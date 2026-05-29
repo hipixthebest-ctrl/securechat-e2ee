@@ -1,0 +1,27 @@
+services:
+  # Backend Web Service
+  - type: web
+    name: whisper-messenger
+    env: node
+    region: oregon  # или frankfurt
+    plan: free  # или starter, pro
+    branch: main
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: DATABASE_PATH
+        value: /var/data/whisper.db
+      - key: LOG_LEVEL
+        value: info
+    autoDeploy: true
+    domains:
+      - whisper.yourdomain.com  # замени на свой домен
