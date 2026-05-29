@@ -1,34 +1,46 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
-const path = require('path');
 
 const app = express();
 
-// Вот это важно - укажи ПРЯМОЙ путь
-app.use(express.static(path.join(__dirname, 'public')));
-
-// Отдаём index.html руками
+// Отдаём HTML прямо из строки
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Chat</title>
+            <style>
+                body {
+                    background: black;
+                    color: lime;
+                    text-align: center;
+                    padding-top: 100px;
+                    font-family: Arial;
+                    font-size: 40px;
+                }
+            </style>
+        </head>
+        <body>
+            NO PUBLIC FOLDER - INLINE HTML
+            <script src="/socket.io/socket.io.js"></script>
+        </body>
+        </html>
+    `);
 });
 
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    }
+    cors: { origin: "*" }
 });
 
 io.on('connection', (socket) => {
-    console.log('Connected:', socket.id);
-    socket.on('disconnect', () => console.log('Disconnected:', socket.id));
+    console.log('User:', socket.id);
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
-    console.log('Server on port', PORT);
-    console.log('Dir:', __dirname);
-    console.log('Public path:', path.join(__dirname, 'public'));
+    console.log('Server running on port', PORT);
 });
