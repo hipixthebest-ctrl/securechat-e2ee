@@ -1,103 +1,17 @@
-<!DOCTYPE html>
 <html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Test</title>
-</head>
-<body style="background: #000; color: #0f0; font-family: monospace; padding: 20px;">
-    <h1>Test Page</h1>
-    <div id="log"></div>
-    
+<body style="background:black;color:lime;text-align:center;padding-top:100px;font-size:30px;">
+    LOADING...
+    <script src="/socket.io/socket.io.js"></script>
     <script>
-        var logDiv = document.getElementById('log');
-        
-        function addLog(msg, color) {
-            var p = document.createElement('p');
-            p.textContent = msg;
-            p.style.color = color || '#0f0';
-            logDiv.appendChild(p);
-        }
-        
-        addLog('✅ HTML loaded', '#0f0');
-        addLog('✅ JavaScript running', '#0f0');
-        addLog('Window location: ' + window.location.href, '#fff');
-        
-        // Пробуем загрузить socket.io
-        addLog('Loading socket.io...', '#ff0');
-        
-        var script = document.createElement('script');
-        script.src = '/socket.io/socket.io.js';
-        
-        script.onload = function() {
-            addLog('✅ socket.io.js loaded successfully', '#0f0');
-            
-            if (typeof io !== 'undefined') {
-                addLog('✅ io object found', '#0f0');
-                
-                try {
-                    var socket = io();
-                    
-                    socket.on('connect', function() {
-                        addLog('✅ CONNECTED to server!', '#0f0');
-                        addLog('Socket ID: ' + socket.id, '#fff');
-                    });
-                    
-                    socket.on('welcome', function(msg) {
-                        addLog('📩 Server says: ' + msg, '#0f0');
-                    });
-                    
-                    socket.on('connect_error', function(err) {
-                        addLog('❌ Connection error: ' + err.message, '#f00');
-                    });
-                    
-                    socket.on('disconnect', function() {
-                        addLog('❌ Disconnected', '#f00');
-                    });
-                    
-                } catch(e) {
-                    addLog('❌ Error creating socket: ' + e.message, '#f00');
-                }
-            } else {
-                addLog('❌ io is undefined!', '#f00');
+        setTimeout(() => {
+            try {
+                const s = io();
+                s.on('connect', () => document.body.innerHTML = 'OK ' + s.id);
+                s.on('connect_error', e => document.body.innerHTML = 'ERR');
+            } catch(e) {
+                document.body.innerHTML = 'FAIL';
             }
-        };
-        
-        script.onerror = function(e) {
-            addLog('❌ FAILED to load socket.io.js', '#f00');
-            addLog('Trying fetch check...', '#ff0');
-            
-            // Проверяем доступность ручным запросом
-            fetch('/socket.io/socket.io.js')
-                .then(function(r) {
-                    addLog('Fetch status: ' + r.status + ' ' + r.statusText, '#fff');
-                    return r.text();
-                })
-                .then(function(text) {
-                    addLog('Response length: ' + text.length, '#fff');
-                    if (text.length < 100) {
-                        addLog('Response: ' + text.substring(0, 100), '#f00');
-                    } else {
-                        addLog('✅ File exists but script tag failed to load it', '#ff0');
-                    }
-                })
-                .catch(function(err) {
-                    addLog('❌ Fetch failed: ' + err.message, '#f00');
-                });
-        };
-        
-        document.head.appendChild(script);
-        
-        // Также проверим /test
-        addLog('Testing /test endpoint...', '#ff0');
-        fetch('/test')
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                addLog('✅ /test works: ' + JSON.stringify(data), '#0f0');
-            })
-            .catch(function(err) {
-                addLog('❌ /test failed: ' + err.message, '#f00');
-            });
+        }, 1000);
     </script>
 </body>
 </html>
