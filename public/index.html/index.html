@@ -1,157 +1,34 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chat</title>
-    <script src="/socket.io/socket.io.js"></script>
-    <style>
-        body { margin: 0; font-family: Arial, sans-serif; background: #1a1a2e; color: white; }
-        #auth { max-width: 400px; margin: 100px auto; background: #16213e; padding: 30px; border-radius: 10px; }
-        input { width: 100%; padding: 12px; margin: 10px 0; background: #0f3460; border: none; color: white; border-radius: 5px; }
-        button { width: 100%; padding: 12px; background: #e94560; color: white; border: none; border-radius: 5px; cursor: pointer; margin: 10px 0; }
-        #chat { display: none; max-width: 800px; margin: 20px auto; }
-        #messages { height: 400px; overflow-y: auto; background: #16213e; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
-        .msg { margin: 10px 0; padding: 10px; background: #0f3460; border-radius: 10px; }
-        #users { background: #16213e; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
-        .user-item { padding: 10px; cursor: pointer; border-bottom: 1px solid #0f3460; }
-        .user-item:hover { background: #0f3460; }
-    </style>
+    <title>Test Chat</title>
 </head>
 <body>
-    <div id="auth">
-        <h2>Login</h2>
-        <input type="text" id="username" placeholder="Username">
-        <input type="password" id="password" placeholder="Password">
-        <button onclick="login()">Login</button>
-        <button onclick="register()" style="background:#0f3460">Register</button>
-        <p id="error" style="color:red"></p>
-    </div>
-
-    <div id="chat">
-        <h2>Welcome <span id="myName"></span> <button onclick="logout()" style="width:auto;float:right">Logout</button></h2>
-        <div id="users"><h3>Users online</h3><div id="usersList"></div></div>
-        <div id="messages"></div>
-        <input type="text" id="msgInput" placeholder="Type a message..." onkeypress="if(event.key==='Enter')sendMsg()">
-        <button onclick="sendMsg()">Send</button>
-        <input type="file" accept="image/*" onchange="sendPhoto(this)" style="margin-top:10px">
-    </div>
-
+    <h1>Chat Test Page</h1>
+    <div id="status">Connecting...</div>
+    
+    <script src="/socket.io/socket.io.js"></script>
     <script>
-        const socket = io();
-        let currentUser = null;
-        let currentChat = null;
-
-        function login() {
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
-            socket.emit('login', { username, password });
-        }
-
-        function register() {
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
-            socket.emit('register', { username, password, email: username + '@test.com' });
-        }
-
-        socket.on('authError', (msg) => {
-            document.getElementById('error').textContent = msg;
-        });
-
-        socket.on('regError', (msg) => {
-            document.getElementById('error').textContent = msg;
-        });
-
-        socket.on('regSuccess', () => {
-            document.getElementById('error').textContent = 'Registered! Now login.';
-        });
-
-        socket.on('authSuccess', (data) => {
-            currentUser = data;
-            document.getElementById('auth').style.display = 'none';
-            document.getElementById('chat').style.display = 'block';
-            document.getElementById('myName').textContent = data.username;
-        });
-
-        function logout() {
-            socket.emit('logout');
-            currentUser = null;
-            document.getElementById('auth').style.display = 'block';
-            document.getElementById('chat').style.display = 'none';
-        }
-
-        function searchUsers() {
-            const query = prompt('Search user:');
-            if (query) socket.emit('searchUsers', query);
-        }
-
-        socket.on('searchResults', (users) => {
-            const list = document.getElementById('usersList');
-            list.innerHTML = '';
-            users.forEach(u => {
-                const div = document.createElement('div');
-                div.className = 'user-item';
-                div.textContent = u.username;
-                div.onclick = () => {
-                    socket.emit('startChat', u);
-                };
-                list.appendChild(div);
+        // Проверка загрузки socket.io
+        if (typeof io === 'undefined') {
+            document.getElementById('status').innerHTML = '❌ Socket.io not loaded!';
+        } else {
+            document.getElementById('status').innerHTML = '✅ Socket.io loaded!';
+            
+            const socket = io();
+            
+            socket.on('connect', () => {
+                document.getElementById('status').innerHTML += '<br>✅ Connected to server!';
             });
-        });
-
-        socket.on('chatMessages', (data) => {
-            currentChat = data.chatId;
-            const msgs = document.getElementById('messages');
-            msgs.innerHTML = '';
-            data.messages.forEach(m => {
-                const div = document.createElement('div');
-                div.className = 'msg';
-                if (m.image) {
-                    div.innerHTML = `<b>${m.fromName}:</b> <img src="${m.image}" style="max-width:200px"><br><small>${new Date(m.time).toLocaleTimeString()}</small>`;
-                } else {
-                    div.innerHTML = `<b>${m.fromName}:</b> ${m.text}<br><small>${new Date(m.time).toLocaleTimeString()}</small>`;
-                }
-                msgs.appendChild(div);
+            
+            socket.on('welcome', (msg) => {
+                document.getElementById('status').innerHTML += '<br>📩 ' + msg;
             });
-            msgs.scrollTop = msgs.scrollHeight;
-        });
-
-        socket.on('newMessage', (data) => {
-            if (data.chatId === currentChat) {
-                const msgs = document.getElementById('messages');
-                const div = document.createElement('div');
-                div.className = 'msg';
-                if (data.message.image) {
-                    div.innerHTML = `<b>${data.message.fromName}:</b> <img src="${data.message.image}" style="max-width:200px"><br><small>${new Date(data.message.time).toLocaleTimeString()}</small>`;
-                } else {
-                    div.innerHTML = `<b>${data.message.fromName}:</b> ${data.message.text}<br><small>${new Date(data.message.time).toLocaleTimeString()}</small>`;
-                }
-                msgs.appendChild(div);
-                msgs.scrollTop = msgs.scrollHeight;
-            }
-        });
-
-        function sendMsg() {
-            const input = document.getElementById('msgInput');
-            const text = input.value.trim();
-            if (text && currentChat) {
-                socket.emit('sendMessage', { chatId: currentChat, text });
-                input.value = '';
-            }
+            
+            socket.on('connect_error', () => {
+                document.getElementById('status').innerHTML += '<br>❌ Connection error';
+            });
         }
-
-        function sendPhoto(input) {
-            const file = input.files[0];
-            if (!file || !currentChat) return;
-            const reader = new FileReader();
-            reader.onload = () => {
-                socket.emit('sendImage', { chatId: currentChat, image: reader.result });
-            };
-            reader.readAsDataURL(file);
-        }
-
-        // Авто-поиск при загрузке
-        setTimeout(searchUsers, 1000);
     </script>
 </body>
 </html>
