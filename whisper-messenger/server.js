@@ -79,7 +79,7 @@ db.exec(`
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
-app.use(express.static(path.join(__dirname, '../client')));
+app.use(express.static(path.join(__dirname, 'client')));
 
 // Rate limiting
 const limiter = rateLimit({
@@ -656,7 +656,7 @@ io.on('connection', (socket) => {
 
 // Serve client for all routes
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../client/index.html'));
+  res.sendFile(path.join(__dirname, 'client/index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
