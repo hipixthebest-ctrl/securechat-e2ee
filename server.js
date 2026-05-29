@@ -7,648 +7,146 @@ const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
 
-// ============ БАЗА ДАННЫХ В ПАМЯТИ ============
-const accounts = new Map(); // username -> { password, userId, chats: Map(chatId -> [messages]) }
-const sessions = new Map(); // sessionToken -> { username, userId }
-const onlineUsers = new Map(); // userId -> { username, socketId }
+const accounts = new Map();
+const onlineUsers = new Map();
 
-// Создаём папку client
 const clientDir = path.join(__dirname, 'client');
 if (!fs.existsSync(clientDir)) {
-    fs.mkdirSync(clientDir);
+    fs.mkdirSync(clientDir, { recursive: true });
 }
 
-// ============ HTML ФАЙЛ ============
-const indexPath = path.join(clientDir, 'index.html');
 const htmlContent = `<!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecureChat - Аккаунты и ЛС</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            height: 100vh;
-        }
-
-        .auth-screen {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            padding: 20px;
-        }
-        .auth-box {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            padding: 40px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-            width: 100%;
-            max-width: 400px;
-            text-align: center;
-        }
-        .auth-box h2 {
-            color: #667eea;
-            margin-bottom: 10px;
-            font-size: 2rem;
-        }
-        .auth-box p {
-            color: #666;
-            margin-bottom: 25px;
-        }
-        .auth-input {
-            width: 100%;
-            padding: 12px 16px;
-            margin-bottom: 15px;
-            border: 2px solid #e0e0e0;
-            border-radius: 10px;
-            font-size: 1rem;
-            outline: none;
-            transition: border-color 0.3s;
-        }
-        .auth-input:focus {
-            border-color: #667eea;
-        }
-        .auth-button {
-            width: 100%;
-            padding: 14px;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-size: 1.1rem;
-            cursor: pointer;
-            margin-bottom: 15px;
-            font-weight: 500;
-            transition: transform 0.2s;
-        }
-        .auth-button:hover {
-            transform: scale(1.02);
-        }
-        .auth-button:active {
-            transform: scale(0.98);
-        }
-        .auth-link {
-            color: #667eea;
-            cursor: pointer;
-            text-decoration: underline;
-        }
-        .auth-link:hover {
-            color: #764ba2;
-        }
-        .error-message {
-            color: #f44336;
-            margin: 10px 0;
-            font-size: 0.9rem;
-        }
-
-        .app-container {
-            max-width: 1200px;
-            height: 90vh;
-            margin: 5vh auto;
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-            display: flex;
-            overflow: hidden;
-        }
-        .sidebar {
-            width: 300px;
-            background: #f8f9fa;
-            border-right: 1px solid #e0e0e0;
-            display: flex;
-            flex-direction: column;
-        }
-        .sidebar-header {
-            padding: 20px;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-        }
-        .sidebar-header .user-info {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-        .sidebar-header h2 {
-            font-size: 1.2rem;
-        }
-        .logout-btn {
-            background: rgba(255,255,255,0.2);
-            border: none;
-            color: white;
-            padding: 5px 12px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 0.8rem;
-        }
-        .logout-btn:hover {
-            background: rgba(255,255,255,0.3);
-        }
-        #searchUser {
-            width: 100%;
-            padding: 8px 12px;
-            border: none;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            outline: none;
-        }
-        .chats-list {
-            flex: 1;
-            overflow-y: auto;
-        }
-        .chat-item {
-            padding: 15px 20px;
-            cursor: pointer;
-            border-bottom: 1px solid #eee;
-            transition: background 0.2s;
-        }
-        .chat-item:hover {
-            background: #e3f2fd;
-        }
-        .chat-item.active {
-            background: #bbdefb;
-            border-left: 3px solid #667eea;
-        }
-        .chat-item-name {
-            font-weight: 500;
-            color: #333;
-        }
-        .chat-item-last {
-            font-size: 0.8rem;
-            color: #999;
-            margin-top: 3px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        .chat-item-time {
-            font-size: 0.7rem;
-            color: #bbb;
-            float: right;
-        }
-        .users-section {
-            border-top: 2px solid #e0e0e0;
-            padding: 10px;
-            background: white;
-        }
-        .users-section-title {
-            font-size: 0.8rem;
-            color: #999;
-            text-transform: uppercase;
-            padding: 5px 12px;
-            letter-spacing: 1px;
-        }
-        .online-user {
-            padding: 8px 12px;
-            margin: 3px 0;
-            cursor: pointer;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            transition: background 0.2s;
-        }
-        .online-user:hover {
-            background: #e3f2fd;
-        }
-        .online-dot {
-            width: 8px;
-            height: 8px;
-            background: #4caf50;
-            border-radius: 50%;
-        }
-        .chat-area {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-        }
-        .chat-header {
-            padding: 20px;
-            background: white;
-            border-bottom: 1px solid #e0e0e0;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .chat-header h3 {
-            color: #333;
-            flex: 1;
-        }
-        .messages-container {
-            flex: 1;
-            overflow-y: auto;
-            padding: 20px;
-            background: #f5f5f5;
-            display: flex;
-            flex-direction: column;
-        }
-        .message {
-            margin-bottom: 15px;
-            display: flex;
-            flex-direction: column;
-            animation: slideIn 0.3s ease;
-        }
-        .message.own {
-            align-items: flex-end;
-        }
-        @keyframes slideIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .message-info {
-            font-size: 0.7rem;
-            color: #999;
-            margin-bottom: 2px;
-        }
-        .message-bubble {
-            padding: 10px 16px;
-            border-radius: 18px;
-            max-width: 70%;
-            word-wrap: break-word;
-            font-size: 0.95rem;
-        }
-        .message.other .message-bubble {
-            background: white;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            border-bottom-left-radius: 5px;
-        }
-        .message.own .message-bubble {
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-            border-bottom-right-radius: 5px;
-        }
-        .input-container {
-            padding: 20px;
-            background: white;
-            display: flex;
-            gap: 10px;
-            border-top: 1px solid #eee;
-        }
-        #messageInput {
-            flex: 1;
-            padding: 12px 16px;
-            border: 2px solid #e0e0e0;
-            border-radius: 25px;
-            font-size: 0.95rem;
-            outline: none;
-            transition: border-color 0.3s;
-        }
-        #messageInput:focus {
-            border-color: #667eea;
-        }
-        #sendButton {
-            padding: 12px 25px;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            color: white;
-            border: none;
-            border-radius: 25px;
-            font-size: 1rem;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-        #sendButton:hover {
-            transform: scale(1.05);
-        }
-        #sendButton:active {
-            transform: scale(0.95);
-        }
-        .no-chat {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #999;
-            font-size: 1.1rem;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SecureChat</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);height:100vh}
+.auth-screen{display:flex;justify-content:center;align-items:center;height:100vh;padding:20px}
+.auth-box{background:rgba(255,255,255,0.95);border-radius:20px;padding:40px;box-shadow:0 8px 32px rgba(0,0,0,0.3);width:100%;max-width:400px;text-align:center}
+.auth-box h2{color:#667eea;margin-bottom:10px;font-size:2rem}
+.auth-input{width:100%;padding:12px 16px;margin-bottom:15px;border:2px solid #e0e0e0;border-radius:10px;font-size:1rem;outline:none}
+.auth-input:focus{border-color:#667eea}
+.auth-button{width:100%;padding:14px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:10px;font-size:1.1rem;cursor:pointer;margin-bottom:15px}
+.auth-link{color:#667eea;cursor:pointer;text-decoration:underline}
+.error-message{color:#f44336;margin:10px 0;font-size:.9rem}
+.app-container{max-width:1200px;height:90vh;margin:5vh auto;background:rgba(255,255,255,0.95);border-radius:20px;box-shadow:0 8px 32px rgba(0,0,0,0.3);display:flex;overflow:hidden}
+.sidebar{width:300px;background:#f8f9fa;border-right:1px solid #e0e0e0;display:flex;flex-direction:column}
+.sidebar-header{padding:20px;background:linear-gradient(135deg,#667eea,#764ba2);color:white}
+.user-info{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.logout-btn{background:rgba(255,255,255,0.2);border:none;color:white;padding:5px 12px;border-radius:5px;cursor:pointer}
+.chats-list{flex:1;overflow-y:auto}
+.chat-item{padding:15px 20px;cursor:pointer;border-bottom:1px solid #eee}
+.chat-item:hover{background:#e3f2fd}
+.chat-item.active{background:#bbdefb;border-left:3px solid #667eea}
+.chat-item-name{font-weight:500;color:#333}
+.online-user{padding:8px 12px;margin:3px 0;cursor:pointer;border-radius:8px;display:flex;align-items:center;gap:8px}
+.online-user:hover{background:#e3f2fd}
+.online-dot{width:8px;height:8px;background:#4caf50;border-radius:50%}
+.chat-area{flex:1;display:flex;flex-direction:column}
+.chat-header{padding:20px;background:white;border-bottom:1px solid #e0e0e0}
+.messages-container{flex:1;overflow-y:auto;padding:20px;background:#f5f5f5}
+.message{margin-bottom:15px;display:flex;flex-direction:column}
+.message.own{align-items:flex-end}
+.message-bubble{padding:10px 16px;border-radius:18px;max-width:70%;word-wrap:break-word}
+.message.other .message-bubble{background:white;box-shadow:0 2px 5px rgba(0,0,0,0.1)}
+.message.own .message-bubble{background:linear-gradient(135deg,#667eea,#764ba2);color:white}
+.input-container{padding:20px;background:white;display:flex;gap:10px;border-top:1px solid #eee}
+#messageInput{flex:1;padding:12px 16px;border:2px solid #e0e0e0;border-radius:25px;font-size:.95rem;outline:none}
+#sendButton{padding:12px 25px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:25px;cursor:pointer}
+.no-chat{flex:1;display:flex;align-items:center;justify-content:center;color:#999}
+</style>
 </head>
 <body>
-    <!-- ЭКРАН ВХОДА -->
-    <div id="loginScreen" class="auth-screen">
-        <div class="auth-box">
-            <h2>SecureChat</h2>
-            <p>Войдите в аккаунт</p>
-            <input type="text" id="loginUsername" class="auth-input" placeholder="Имя пользователя" maxlength="20">
-            <input type="password" id="loginPassword" class="auth-input" placeholder="Пароль">
-            <div class="error-message" id="loginError" style="display: none;"></div>
-            <button class="auth-button" onclick="login()">Войти</button>
-            <p>Нет аккаунта? <span class="auth-link" onclick="showRegister()">Создать</span></p>
-        </div>
-    </div>
-
-    <!-- ЭКРАН РЕГИСТРАЦИИ -->
-    <div id="registerScreen" class="auth-screen" style="display: none;">
-        <div class="auth-box">
-            <h2>Регистрация</h2>
-            <p>Создайте новый аккаунт</p>
-            <input type="text" id="regUsername" class="auth-input" placeholder="Имя пользователя" maxlength="20">
-            <input type="password" id="regPassword" class="auth-input" placeholder="Пароль">
-            <input type="password" id="regPasswordConfirm" class="auth-input" placeholder="Подтвердите пароль">
-            <div class="error-message" id="regError" style="display: none;"></div>
-            <button class="auth-button" onclick="register()">Создать аккаунт</button>
-            <p>Уже есть аккаунт? <span class="auth-link" onclick="showLogin()">Войти</span></p>
-        </div>
-    </div>
-
-    <!-- ИНТЕРФЕЙС ЧАТА -->
-    <div id="chatScreen" style="display: none;" class="app-container">
-        <div class="sidebar">
-            <div class="sidebar-header">
-                <div class="user-info">
-                    <h2>Чаты</h2>
-                    <button class="logout-btn" onclick="logout()">Выйти</button>
-                </div>
-                <div id="currentUsername" style="font-size: 0.9rem; opacity: 0.9;"></div>
-                <input type="text" id="searchUser" placeholder="Поиск пользователя..." onkeyup="filterUsers()" style="margin-top: 10px;">
-            </div>
-            <div class="chats-list" id="chatsList"></div>
-            <div class="users-section">
-                <div class="users-section-title">Онлайн пользователи</div>
-                <div id="usersList"></div>
-            </div>
-        </div>
-
-        <div class="chat-area">
-            <div class="chat-header">
-                <h3 id="chatTitle">Выберите чат</h3>
-            </div>
-            <div class="messages-container" id="messagesContainer">
-                <div class="no-chat">Выберите пользователя для начала переписки</div>
-            </div>
-            <div class="input-container" id="inputContainer" style="display: none;">
-                <input type="text" id="messageInput" placeholder="Введите сообщение..." maxlength="500">
-                <button id="sendButton" onclick="sendMessage()">Отправить</button>
-            </div>
-        </div>
-    </div>
-
-    <script src="/socket.io/socket.io.js"></script>
-    <script>
-        let socket;
-        let currentUser = null;
-        let currentChat = null;
-        let allChats = [];
-        let onlineUsersList = [];
-
-        function showRegister() {
-            document.getElementById('loginScreen').style.display = 'none';
-            document.getElementById('registerScreen').style.display = 'flex';
-        }
-
-        function showLogin() {
-            document.getElementById('registerScreen').style.display = 'none';
-            document.getElementById('loginScreen').style.display = 'flex';
-        }
-
-        function login() {
-            const username = document.getElementById('loginUsername').value.trim();
-            const password = document.getElementById('loginPassword').value;
-
-            if (!username || !password) {
-                showError('loginError', 'Заполните все поля');
-                return;
-            }
-
-            socket.emit('login', { username, password });
-        }
-
-        function register() {
-            const username = document.getElementById('regUsername').value.trim();
-            const password = document.getElementById('regPassword').value;
-            const passwordConfirm = document.getElementById('regPasswordConfirm').value;
-
-            document.getElementById('regError').style.display = 'none';
-
-            if (!username || !password) {
-                showError('regError', 'Заполните все поля');
-                return;
-            }
-            if (username.length < 3) {
-                showError('regError', 'Имя должно быть от 3 символов');
-                return;
-            }
-            if (password.length < 4) {
-                showError('regError', 'Пароль должен быть от 4 символов');
-                return;
-            }
-            if (password !== passwordConfirm) {
-                showError('regError', 'Пароли не совпадают');
-                return;
-            }
-
-            socket.emit('register', { username, password });
-        }
-
-        function showError(elementId, message) {
-            const el = document.getElementById(elementId);
-            el.textContent = message;
-            el.style.display = 'block';
-            setTimeout(() => { el.style.display = 'none'; }, 3000);
-        }
-
-        function logout() {
-            socket.emit('logout');
-            socket.disconnect();
-            currentUser = null;
-            currentChat = null;
-            allChats = [];
-            document.getElementById('chatScreen').style.display = 'none';
-            document.getElementById('loginScreen').style.display = 'flex';
-            document.getElementById('loginUsername').value = '';
-            document.getElementById('loginPassword').value = '';
-        }
-
-        function connectSocket() {
-            socket = io();
-
-            socket.on('authSuccess', (data) => {
-                currentUser = data;
-                document.getElementById('currentUsername').textContent = 'User: ' + data.username;
-                document.getElementById('loginScreen').style.display = 'none';
-                document.getElementById('registerScreen').style.display = 'none';
-                document.getElementById('chatScreen').style.display = 'flex';
-
-                allChats = data.chats || [];
-                updateChatsList();
-            });
-
-            socket.on('authError', (data) => {
-                showError('loginError', data.message);
-            });
-
-            socket.on('regSuccess', () => {
-                showLogin();
-                document.getElementById('loginUsername').value = document.getElementById('regUsername').value;
-                alert('Аккаунт создан! Теперь войдите.');
-            });
-
-            socket.on('regError', (data) => {
-                showError('regError', data.message);
-            });
-
-            socket.on('onlineUsers', (users) => {
-                onlineUsersList = users.filter(u => u.username !== currentUser?.username);
-                filterUsers();
-            });
-
-            socket.on('chatMessages', (data) => {
-                if (currentChat === data.chatId) {
-                    displayMessages(data.messages);
-                }
-            });
-
-            socket.on('newMessage', (data) => {
-                if (currentChat === data.chatId) {
-                    appendMessage(data.message);
-                }
-                updateChatPreview(data);
-            });
-        }
-
-        function filterUsers() {
-            const searchTerm = document.getElementById('searchUser')?.value?.toLowerCase() || '';
-            const usersList = document.getElementById('usersList');
-            
-            let html = '';
-            onlineUsersList
-                .filter(u => u.username.toLowerCase().includes(searchTerm))
-                .forEach(user => {
-                    html += '<div class="online-user" onclick="startChat(\'' + user.userId + '\', \'' + escapeHtml(user.username) + '\')">' +
-                        '<span class="online-dot"></span>' +
-                        '<span>' + escapeHtml(user.username) + '</span>' +
-                    '</div>';
-                });
-            usersList.innerHTML = html || '<div style="padding: 10px; color: #999; font-size: 0.9rem;">Нет пользователей</div>';
-        }
-
-        function startChat(peerId, peerName) {
-            currentChat = peerId;
-            document.getElementById('chatTitle').textContent = 'Chat: ' + peerName;
-            document.getElementById('inputContainer').style.display = 'flex';
-            document.getElementById('messagesContainer').innerHTML = '';
-            
-            socket.emit('getChat', { peerId });
-            updateChatsList();
-        }
-
-        function switchChat(chatId, peerName) {
-            currentChat = chatId;
-            document.getElementById('chatTitle').textContent = 'Chat: ' + peerName;
-            document.getElementById('inputContainer').style.display = 'flex';
-            document.getElementById('messagesContainer').innerHTML = '';
-            
-            socket.emit('getChat', { chatId });
-            updateChatsList();
-        }
-
-        function sendMessage() {
-            const input = document.getElementById('messageInput');
-            const text = input.value.trim();
-            
-            if (!text || !currentChat) return;
-
-            socket.emit('sendMessage', { to: currentChat, text });
-            input.value = '';
-        }
-
-        function displayMessages(messages) {
-            const container = document.getElementById('messagesContainer');
-            container.innerHTML = '';
-            if (messages && messages.length > 0) {
-                messages.forEach(msg => appendMessage(msg));
-            }
-            container.scrollTop = container.scrollHeight;
-        }
-
-        function appendMessage(msg) {
-            const container = document.getElementById('messagesContainer');
-            const div = document.createElement('div');
-            const isOwn = msg.from === currentUser.userId;
-            
-            div.className = 'message ' + (isOwn ? 'own' : 'other');
-
-            const time = new Date(msg.timestamp).toLocaleTimeString('ru-RU', {
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-
-            div.innerHTML = '<div class="message-info">' + time + '</div>' +
-                '<div class="message-bubble">' + escapeHtml(msg.text) + '</div>';
-
-            container.appendChild(div);
-            container.scrollTop = container.scrollHeight;
-        }
-
-        function updateChatPreview(data) {
-            let chat = allChats.find(c => c.id === data.chatId);
-            if (!chat) {
-                const peerName = data.message.fromName || 'Пользователь';
-                chat = { id: data.chatId, with: peerName, messages: [] };
-                allChats.push(chat);
-            }
-            chat.lastMessage = data.message.text;
-            chat.lastTime = data.message.timestamp;
-            updateChatsList();
-        }
-
-        function updateChatsList() {
-            const chatsList = document.getElementById('chatsList');
-            let html = '';
-            
-            allChats.forEach(chat => {
-                const timeStr = chat.lastTime ? new Date(chat.lastTime).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '';
-                html += '<div class="chat-item ' + (currentChat === chat.id ? 'active' : '') + '" onclick="switchChat(\'' + chat.id + '\', \'' + escapeHtml(chat.with) + '\')">' +
-                    '<div class="chat-item-name">' + escapeHtml(chat.with) + '</div>' +
-                    '<div class="chat-item-last">' + escapeHtml(chat.lastMessage || 'Нет сообщений') + '</div>' +
-                    '<div class="chat-item-time">' + timeStr + '</div>' +
-                '</div>';
-            });
-            
-            chatsList.innerHTML = html || '<div style="padding: 20px; text-align: center; color: #999;">У вас пока нет чатов</div>';
-        }
-
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text || '';
-            return div.innerHTML;
-        }
-
-        connectSocket();
-
-        document.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                if (document.getElementById('loginScreen').style.display === 'flex') {
-                    login();
-                } else if (document.getElementById('registerScreen').style.display === 'flex') {
-                    register();
-                } else if (document.getElementById('chatScreen').style.display === 'flex') {
-                    sendMessage();
-                }
-            }
-        });
-    </script>
+<div id="loginScreen" class="auth-screen">
+<div class="auth-box">
+<h2>SecureChat</h2>
+<p>Войдите в аккаунт</p>
+<input type="text" id="loginUsername" class="auth-input" placeholder="Логин" maxlength="20">
+<input type="password" id="loginPassword" class="auth-input" placeholder="Пароль">
+<div class="error-message" id="loginError" style="display:none"></div>
+<button class="auth-button" onclick="login()">Войти</button>
+<p>Нет аккаунта? <span class="auth-link" onclick="showRegister()">Создать</span></p>
+</div>
+</div>
+<div id="registerScreen" class="auth-screen" style="display:none">
+<div class="auth-box">
+<h2>Регистрация</h2>
+<p>Создайте аккаунт</p>
+<input type="text" id="regUsername" class="auth-input" placeholder="Логин" maxlength="20">
+<input type="password" id="regPassword" class="auth-input" placeholder="Пароль">
+<input type="password" id="regPasswordConfirm" class="auth-input" placeholder="Подтвердите пароль">
+<div class="error-message" id="regError" style="display:none"></div>
+<button class="auth-button" onclick="register()">Создать</button>
+<p>Есть аккаунт? <span class="auth-link" onclick="showLogin()">Войти</span></p>
+</div>
+</div>
+<div id="chatScreen" style="display:none" class="app-container">
+<div class="sidebar">
+<div class="sidebar-header">
+<div class="user-info"><h2>Чаты</h2><button class="logout-btn" onclick="logout()">Выйти</button></div>
+<div id="currentUsername"></div>
+<input type="text" id="searchUser" placeholder="Поиск..." onkeyup="filterUsers()" style="margin-top:10px;width:100%;padding:8px;border:none;border-radius:20px">
+</div>
+<div class="chats-list" id="chatsList"></div>
+<div style="border-top:2px solid #e0e0e0;padding:10px">
+<div style="font-size:.8rem;color:#999;padding:5px">Онлайн</div>
+<div id="usersList"></div>
+</div>
+</div>
+<div class="chat-area">
+<div class="chat-header"><h3 id="chatTitle">Выберите чат</h3></div>
+<div class="messages-container" id="messagesContainer"><div class="no-chat">Выберите пользователя</div></div>
+<div class="input-container" id="inputContainer" style="display:none">
+<input type="text" id="messageInput" placeholder="Сообщение..." maxlength="500">
+<button id="sendButton" onclick="sendMessage()">Отпр.</button>
+</div>
+</div>
+</div>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+var socket, currentUser=null, currentChat=null, allChats=[], onlineUsersList=[];
+function showRegister(){document.getElementById('loginScreen').style.display='none';document.getElementById('registerScreen').style.display='flex'}
+function showLogin(){document.getElementById('registerScreen').style.display='none';document.getElementById('loginScreen').style.display='flex'}
+function login(){var u=document.getElementById('loginUsername').value.trim();var p=document.getElementById('loginPassword').value;if(!u||!p){showError('loginError','Заполните все поля');return}socket.emit('login',{username:u,password:p})}
+function register(){var u=document.getElementById('regUsername').value.trim();var p=document.getElementById('regPassword').value;var pc=document.getElementById('regPasswordConfirm').value;if(!u||!p){showError('regError','Заполните поля');return}if(u.length<3){showError('regError','Минимум 3 символа');return}if(p.length<4){showError('regError','Пароль от 4 символов');return}if(p!==pc){showError('regError','Пароли не совпадают');return}socket.emit('register',{username:u,password:p})}
+function showError(id,msg){var el=document.getElementById(id);el.textContent=msg;el.style.display='block';setTimeout(function(){el.style.display='none'},3000)}
+function logout(){socket.emit('logout');socket.disconnect();currentUser=null;currentChat=null;allChats=[];document.getElementById('chatScreen').style.display='none';document.getElementById('loginScreen').style.display='flex'}
+function connectSocket(){socket=io();socket.on('authSuccess',function(d){currentUser=d;document.getElementById('currentUsername').textContent=d.username;document.getElementById('loginScreen').style.display='none';document.getElementById('registerScreen').style.display='none';document.getElementById('chatScreen').style.display='flex';allChats=d.chats||[];updateChatsList()});socket.on('authError',function(d){showError('loginError',d.message)});socket.on('regSuccess',function(){showLogin();alert('Аккаунт создан!')});socket.on('regError',function(d){showError('regError',d.message)});socket.on('onlineUsers',function(u){onlineUsersList=u.filter(function(x){return x.username!==currentUser.username});filterUsers()});socket.on('chatMessages',function(d){if(currentChat===d.chatId){displayMessages(d.messages)}});socket.on('newMessage',function(d){if(currentChat===d.chatId){appendMessage(d.message)}updateChatPreview(d)})}
+function filterUsers(){var s=(document.getElementById('searchUser').value||'').toLowerCase();var ul=document.getElementById('usersList');var h='';onlineUsersList.forEach(function(u){if(u.username.toLowerCase().indexOf(s)!==-1){h+='<div class="online-user" onclick="startChat(\\''+u.userId+'\\',\\''+u.username.replace(/'/g,"\\\\'")+'\\')"><span class="online-dot"></span><span>'+u.username.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</span></div>'}});ul.innerHTML=h||'<div style="padding:10px;color:#999">Нет</div>'}
+function startChat(pid,pname){currentChat=pid;document.getElementById('chatTitle').textContent=pname;document.getElementById('inputContainer').style.display='flex';document.getElementById('messagesContainer').innerHTML='';socket.emit('getChat',{peerId:pid});updateChatsList()}
+function switchChat(cid,pname){currentChat=cid;document.getElementById('chatTitle').textContent=pname;document.getElementById('inputContainer').style.display='flex';document.getElementById('messagesContainer').innerHTML='';socket.emit('getChat',{chatId:cid});updateChatsList()}
+function sendMessage(){var inp=document.getElementById('messageInput');var txt=inp.value.trim();if(!txt||!currentChat)return;socket.emit('sendMessage',{to:currentChat,text:txt});inp.value=''}
+function displayMessages(msgs){var c=document.getElementById('messagesContainer');c.innerHTML='';if(msgs)msgs.forEach(function(m){appendMessage(m)});c.scrollTop=c.scrollHeight}
+function appendMessage(m){var c=document.getElementById('messagesContainer');var d=document.createElement('div');d.className='message'+(m.from===currentUser.userId?' own':' other');var t=new Date(m.timestamp).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});d.innerHTML='<div style="font-size:.7rem;color:#999">'+t+'</div><div class="message-bubble">'+m.text.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>';c.appendChild(d);c.scrollTop=c.scrollHeight}
+function updateChatPreview(d){var c=allChats.find(function(x){return x.id===d.chatId});if(!c){c={id:d.chatId,with:d.message.fromName||'User',messages:[]};allChats.push(c)}c.lastMessage=d.message.text;c.lastTime=d.message.timestamp;updateChatsList()}
+function updateChatsList(){var cl=document.getElementById('chatsList');var h='';allChats.forEach(function(c){var t=c.lastTime?new Date(c.lastTime).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}):'';h+='<div class="chat-item'+(currentChat===c.id?' active':'')+'" onclick="switchChat(\\''+c.id+'\\',\\''+c.with.replace(/'/g,"\\\\'")+'\\')"><div class="chat-item-name">'+c.with.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div><div style="font-size:.8rem;color:#999">'+(c.lastMessage||'Нет сообщений').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div><div style="font-size:.7rem;color:#bbb;float:right">'+t+'</div></div>'});cl.innerHTML=h||'<div style="padding:20px;text-align:center;color:#999">Нет чатов</div>'}
+connectSocket();
+document.addEventListener('keypress',function(e){if(e.key==='Enter'){if(document.getElementById('loginScreen').style.display==='flex')login();else if(document.getElementById('registerScreen').style.display==='flex')register();else if(document.getElementById('chatScreen').style.display==='flex')sendMessage()}});
+</script>
 </body>
 </html>`;
 
+const indexPath = path.join(clientDir, 'index.html');
 fs.writeFileSync(indexPath, htmlContent, 'utf8');
-console.log('HTML создан с системой аккаунтов');
 
 app.use(express.static(clientDir));
 app.get('/', (req, res) => {
     res.sendFile(indexPath);
 });
 
-// ============ СОКЕТ ЛОГИКА ============
 io.on('connection', (socket) => {
-    console.log('Новое подключение');
+    console.log('New connection');
 
-    // === РЕГИСТРАЦИЯ ===
     socket.on('register', (data) => {
         const { username, password } = data;
         const userKey = username.toLowerCase();
@@ -668,15 +166,12 @@ io.on('connection', (socket) => {
             chats: new Map()
         });
 
-        console.log('Зарегистрирован: ' + username);
         socket.emit('regSuccess');
     });
 
-    // === ВХОД ===
     socket.on('login', (data) => {
         const { username, password } = data;
         const userKey = username.toLowerCase();
-        
         const account = accounts.get(userKey);
 
         if (!account) {
@@ -691,11 +186,6 @@ io.on('connection', (socket) => {
             return;
         }
 
-        // Создаём сессию
-        const sessionToken = crypto.randomBytes(16).toString('hex');
-        sessions.set(sessionToken, { username: account.username, userId: account.userId });
-
-        // Сохраняем в онлайне
         onlineUsers.set(account.userId, {
             username: account.username,
             socketId: socket.id
@@ -704,7 +194,6 @@ io.on('connection', (socket) => {
         socket.userId = account.userId;
         socket.username = account.username;
 
-        // Формируем список чатов
         const userChats = [];
         account.chats.forEach((messages, chatId) => {
             const parts = chatId.split('_');
@@ -714,7 +203,7 @@ io.on('connection', (socket) => {
             
             userChats.push({
                 id: chatId,
-                with: peerAccount ? peerAccount.username : 'Неизвестный',
+                with: peerAccount ? peerAccount.username : 'Unknown',
                 lastMessage: lastMsg ? lastMsg.text : '',
                 lastTime: lastMsg ? lastMsg.timestamp : 0
             });
@@ -727,31 +216,20 @@ io.on('connection', (socket) => {
         });
 
         broadcastOnlineUsers();
-        console.log(username + ' вошёл в систему');
     });
 
-    // === ПОЛУЧИТЬ ЧАТ ===
     socket.on('getChat', (data) => {
         if (!socket.userId) return;
-
         const peerId = data.peerId || data.chatId;
         const chatId = [socket.userId, peerId].sort().join('_');
-        
         const account = getAccountByUserId(socket.userId);
         if (!account) return;
-
         const messages = account.chats.get(chatId) || [];
-        
-        socket.emit('chatMessages', {
-            chatId,
-            messages
-        });
+        socket.emit('chatMessages', { chatId, messages });
     });
 
-    // === ОТПРАВИТЬ СООБЩЕНИЕ ===
     socket.on('sendMessage', (data) => {
         if (!socket.userId) return;
-
         const chatId = [socket.userId, data.to].sort().join('_');
         const message = {
             from: socket.userId,
@@ -761,50 +239,33 @@ io.on('connection', (socket) => {
             timestamp: Date.now()
         };
 
-        // Сохраняем у отправителя
         const senderAccount = getAccountByUserId(socket.userId);
         if (senderAccount) {
-            if (!senderAccount.chats.has(chatId)) {
-                senderAccount.chats.set(chatId, []);
-            }
+            if (!senderAccount.chats.has(chatId)) senderAccount.chats.set(chatId, []);
             senderAccount.chats.get(chatId).push(message);
         }
 
-        // Сохраняем у получателя
         const receiverAccount = getAccountByUserId(data.to);
         if (receiverAccount) {
-            if (!receiverAccount.chats.has(chatId)) {
-                receiverAccount.chats.set(chatId, []);
-            }
+            if (!receiverAccount.chats.has(chatId)) receiverAccount.chats.set(chatId, []);
             receiverAccount.chats.get(chatId).push(message);
         }
 
-        // Отправляем получателю если онлайн
         const receiver = onlineUsers.get(data.to);
         if (receiver) {
-            io.to(receiver.socketId).emit('newMessage', {
-                chatId,
-                message
-            });
+            io.to(receiver.socketId).emit('newMessage', { chatId, message });
         }
 
-        // Отправляем отправителю
-        socket.emit('newMessage', {
-            chatId,
-            message
-        });
+        socket.emit('newMessage', { chatId, message });
     });
 
-    // === ВЫХОД ===
     socket.on('logout', () => {
         if (socket.userId) {
             onlineUsers.delete(socket.userId);
             broadcastOnlineUsers();
-            console.log(socket.username + ' вышел');
         }
     });
 
-    // === ОТКЛЮЧЕНИЕ ===
     socket.on('disconnect', () => {
         if (socket.userId) {
             onlineUsers.delete(socket.userId);
@@ -830,7 +291,5 @@ function broadcastOnlineUsers() {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
-    console.log('Сервер с аккаунтами запущен на порту ' + PORT);
-    console.log('Функции: Регистрация, Вход, История чатов, Личные сообщения');
-});
+    console.log('Server running on port ' + PORT);
 });
