@@ -684,4 +684,528 @@ function switchChat(chatId,peerName,peerAvatar){
     currentChat=chatId;
     document.getElementById('chatHeader').style.display='flex';
     document.getElementById('chatTitle').textContent=peerName;
-    document.getElementById('chatAvatar
+    document.getElementById('chatAvatar')
+        document.getElementById('chatStatus').textContent='';
+    document.getElementById('chatAvatar').innerHTML=peerAvatar?'<img src="'+peerAvatar+'">':peerName.charAt(0).toUpperCase();
+    document.getElementById('inputContainer').style.display='flex';
+    document.getElementById('messagesContainer').innerHTML='';
+    socket.emit('getChat',{chatId:chatId});
+    updateChatsList();
+    if(window.innerWidth<768)document.getElementById('sidebar').classList.remove('open');
+}
+
+function sendMessage(){
+    var inp=document.getElementById('messageInput');
+    var txt=inp.value.trim();
+    if(!txt||!currentChat)return;
+    socket.emit('sendMessage',{to:currentChat,text:txt,type:'text'});
+    inp.value='';
+    inp.focus();
+}
+
+function sendImage(input){
+    if(!input.files||!input.files.length||!currentChat)return;
+    Array.from(input.files).forEach(function(file){
+        var reader=new FileReader();
+        reader.onload=function(e){
+            socket.emit('sendMessage',{to:currentChat,image:e.target.result,type:'image'});
+        };
+        reader.readAsDataURL(file);
+    });
+    input.value='';
+}
+
+function displayMessages(msgs){
+    var c=document.getElementById('messagesContainer');
+    c.innerHTML='';
+    if(msgs&&msgs.length){
+        var groups=groupMessages(msgs);
+        groups.forEach(function(g){appendMessageGroup(g)});
+    }
+    c.scrollTop=c.scrollHeight;
+}
+
+function groupMessages(msgs){
+    var groups=[],currentGroup=null;
+    msgs.forEach(function(m){
+        if(!currentGroup||currentGroup.from!==m.from||m.timestamp-currentGroup.lastTime>300000){
+            currentGroup={from:m.from,fromName:m.fromName,messages:[],lastTime:m.timestamp};
+            groups.push(currentGroup);
+        }
+        currentGroup.messages.push(m);
+        currentGroup.lastTime=m.timestamp;
+    });
+    return groups;
+}
+
+function appendMessageGroup(group){
+    var c=document.getElementById('messagesContainer');
+    var groupDiv=document.createElement('div');
+    groupDiv.className='message-group';
+    
+    var isOwn=group.from===currentUser.userId;
+    var peerAccount=allUsers.find(function(u){return u.userId===group.from});
+    var initial=(group.fromName||'?').charAt(0).toUpperCase();
+    var avatarUrl=peerAccount?peerAccount.avatar:'';
+    
+    group.messages.forEach(function(m,index){
+        var row=document.createElement('div');
+        row.className='message-row '+(isOwn?'own':'other')+(index===group.messages.length-1?' last-in-group':'');
+        
+        var avatarHtml='';
+        if(!isOwn&&index===group.messages.length-1){
+            avatarHtml='<div class="message-avatar">'+(avatarUrl?'<img src="'+avatarUrl+'">':initial)+'</div>';
+        }
+        
+        var bubble='<div class="message-bubble">';
+        if(m.type==='image'){
+            bubble+='<img class="message-image" src="'+m.image+'" onclick="showImage(\\''+m.image+'\\')" loading="lazy">';
+        }else{
+            bubble+=m.text.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+        bubble+='</div>';
+        
+        row.innerHTML=avatarHtml+bubble;
+        groupDiv.appendChild(row);
+    });
+    
+    var timeDiv=document.createElement('div');
+    timeDiv.style.cssText='text-align:'+(isOwn?'right':'left')+';margin-top:2px;margin-bottom:10px;padding:0 8px';
+    timeDiv.innerHTML='<span class="message-time">'+new Date(group.lastTime).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+'</span>';
+    groupDiv.appendChild(timeDiv);
+    
+    c.appendChild(groupDiv);
+    c.scrollTop=c.scrollHeight;
+}
+
+function appendMessage(m){
+    var c=document.getElementById('messagesContainer');
+    var isOwn=m.from===currentUser.userId;
+    var lastGroup=c.querySelector('.message-group:last-child');
+    
+    if(lastGroup){
+        var lastRow=lastGroup.querySelector('.message-row:last-child');
+        if(lastRow&&lastRow.classList.contains(isOwn?'own':'other')){
+            var lastTime=parseInt(lastGroup.dataset.time||'0');
+            if(m.timestamp-lastTime<300000){
+                lastRow.classList.remove('last-in-group');
+                var newRow=document.createElement('div');
+                newRow.className='message-row '+(isOwn?'own':'other')+' last-in-group';
+                newRow.innerHTML='<div class="message-bubble">'+m.text.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>';
+                lastGroup.appendChild(newRow);
+                lastGroup.dataset.time=m.timestamp;
+                c.scrollTop=c.scrollHeight;
+                return;
+            }
+        }
+    }
+    
+    var groupDiv=document.createElement('div');
+    groupDiv.className='message-group';
+    groupDiv.dataset.time=m.timestamp;
+    
+    var row=document.createElement('div');
+    row.className='message-row '+(isOwn?'own':'other')+' last-in-group';
+    
+    if(!isOwn){
+        var peerAccount=allUsers.find(function(u){return u.userId===m.from});
+        row.innerHTML='<div class="message-avatar">'+(peerAccount&&peerAccount.avatar?'<img src="'+peerAccount.avatar+'">':(m.fromName||'?').charAt(0).toUpperCase())+'</div>';
+    }
+    
+    row.innerHTML+='<div class="message-bubble">'+m.text.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>';
+    groupDiv.appendChild(row);
+    
+    var timeDiv=document.createElement('div');
+    timeDiv.className='message-time';
+    timeDiv.style.textAlign=isOwn?'right':'left';
+    timeDiv.textContent=new Date(m.timestamp).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+    groupDiv.appendChild(timeDiv);
+    
+    c.appendChild(groupDiv);
+    c.scrollTop=c.scrollHeight;
+}
+
+function showImage(src){
+    document.getElementById('modalImage').src=src;
+    document.getElementById('imageModal').style.display='flex';
+}
+
+function updateChatPreview(d,isNew){
+    var chat=allChats.find(function(x){return x.id===d.chatId});
+    if(!chat){
+        var peerAccount=allUsers.find(function(u){return u.userId===d.message.from});
+        chat={
+            id:d.chatId,
+            with:d.message.fromName||'Пользователь',
+            avatar:peerAccount?peerAccount.avatar:'',
+            lastMessage:'',
+            lastTime:0,
+            unread:0
+        };
+        allChats.push(chat);
+    }
+    chat.lastMessage=d.message.type==='image'?'📷 Фото':d.message.text;
+    chat.lastTime=d.message.timestamp;
+    if(isNew&&currentChat!==d.chatId)chat.unread=(chat.unread||0)+1;
+    updateChatsList();
+}
+
+function updateChatsList(){
+    var cl=document.getElementById('chatsList');
+    var html='';
+    allChats.sort(function(a,b){return(b.lastTime||0)-(a.lastTime||0)});
+    allChats.forEach(function(c){
+        var t=c.lastTime?formatTime(c.lastTime):'';
+        var unreadHtml=c.unread&&c.unread>0?'<div class="unread-badge">'+(c.unread>99?'99+':c.unread)+'</div>':'';
+        html+='<div class="chat-item'+(currentChat===c.id?' active':'')+'" onclick="switchChat(\\''+c.id+'\\',\\''+c.with.replace(/'/g,"\\\\'")+'\\',\\''+(c.avatar||'')+'\\')">';
+        html+='<div class="chat-item-avatar">'+(c.avatar?'<img src="'+c.avatar+'">':c.with.charAt(0).toUpperCase())+'</div>';
+        html+='<div class="chat-item-info">';
+        html+='<div class="chat-item-header"><span class="chat-item-name">'+c.with.replace(/</g,'&lt;')+'</span><span class="chat-item-time">'+t+'</span></div>';
+        html+='<div class="chat-item-preview">'+(c.lastMessage||'Нет сообщений').replace(/</g,'&lt;')+'</div>';
+        html+='</div>'+unreadHtml+'</div>';
+    });
+    cl.innerHTML=html||'<div style="padding:40px 20px;text-align:center;color:var(--text-secondary);font-size:.9rem">Нет чатов<br><br>🔍 Используйте поиск</div>';
+}
+
+function formatTime(ts){
+    var d=new Date(ts);
+    var now=new Date();
+    if(d.toDateString()===now.toDateString())return d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+    var yesterday=new Date(now);yesterday.setDate(yesterday.getDate()-1);
+    if(d.toDateString()===yesterday.toDateString())return 'Вчера';
+    return d.toLocaleDateString('ru-RU',{day:'numeric',month:'short'});
+}
+
+function changeAvatar(){
+    document.getElementById('avatarChangeInput').click();
+}
+
+function uploadAvatar(input){
+    if(!input.files||!input.files[0]||!currentUser)return;
+    var reader=new FileReader();
+    reader.onload=function(e){
+        fetch('/upload-avatar',{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({userId:currentUser.userId,image:e.target.result})
+        }).then(function(r){return r.json()}).then(function(d){
+            socket.emit('updateAvatar',{avatarUrl:d.avatarUrl});
+            showNotification('Аватар обновлён!');
+        });
+    };
+    reader.readAsDataURL(input.files[0]);
+}
+
+function updateEmail(){
+    var email=document.getElementById('settingsEmail').value.trim();
+    if(!email||!email.includes('@')){showNotification('Введите корректный email');return}
+    socket.emit('updateEmail',{email:email});
+}
+
+function enable2FA(){
+    socket.emit('enable2FA');
+    showNotification('2FA включена! Код будет отправляться при входе');
+}
+
+function installPWA(){
+    if(window.deferredPrompt){
+        window.deferredPrompt.prompt();
+        window.deferredPrompt.userChoice.then(function(result){
+            if(result.outcome==='accepted')showNotification('Приложение установлено!');
+        });
+    }else{
+        alert('Добавьте сайт на экран домой через меню браузера');
+    }
+}
+
+function updateAllAvatars(){
+    document.querySelectorAll('.avatar img,.chat-item-avatar img,.message-avatar img').forEach(function(img){
+        var src=img.getAttribute('src');
+        if(src&&!src.includes('?'))img.setAttribute('src',src+'?'+Date.now());
+    });
+}
+
+// PWA install
+window.addEventListener('beforeinstallprompt',function(e){
+    e.preventDefault();
+    window.deferredPrompt=e;
+    document.getElementById('installBtn').style.display='block';
+});
+
+window.addEventListener('appinstalled',function(){
+    showNotification('Приложение установлено!');
+});
+
+// Register Service Worker
+if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('/sw.js');
+}
+
+connectSocket();
+</script>
+</body>
+</html>`;
+
+fs.writeFileSync(path.join(clientDir, 'index.html'), htmlContent, 'utf8');
+
+app.get('/', (req, res) => {
+    res.sendFile(path.join(clientDir, 'index.html'));
+});
+
+io.on('connection', (socket) => {
+    console.log('User connected');
+
+    socket.on('register', (data) => {
+        const { username, email, password, avatar } = data;
+        const userKey = username.toLowerCase();
+
+        if (accounts.has(userKey)) {
+            socket.emit('regError', { message: 'Пользователь уже существует' });
+            return;
+        }
+
+        const userId = 'usr_' + crypto.randomBytes(8).toString('hex');
+        const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
+        const twoFACode = Math.floor(100000 + Math.random() * 900000).toString();
+        
+        let avatarUrl = '';
+        if (avatar && avatar.startsWith('data:image')) {
+            const base64Data = avatar.replace(/^data:image\/\w+;base64,/, '');
+            const filename = `avatar_${userId}.png`;
+            fs.writeFileSync(path.join(uploadsDir, filename), base64Data, 'base64');
+            avatarUrl = `/uploads/${filename}`;
+        }
+
+        accounts.set(userKey, {
+            password: hashedPassword,
+            userId,
+            username,
+            email,
+            avatar: avatarUrl,
+            twoFAEnabled: false,
+            twoFACode,
+            chats: new Map()
+        });
+
+        socket.emit('regSuccess');
+    });
+
+    socket.on('login', (data) => {
+        const { username, password } = data;
+        const userKey = username.toLowerCase();
+        const account = accounts.get(userKey) || Array.from(accounts.values()).find(a => a.email === username);
+
+        if (!account) {
+            socket.emit('authError', { message: 'Аккаунт не найден' });
+            return;
+        }
+
+        const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
+
+        if (account.password !== hashedPassword) {
+            socket.emit('authError', { message: 'Неверный пароль' });
+            return;
+        }
+
+        if (account.twoFAEnabled) {
+            const code = Math.floor(100000 + Math.random() * 900000).toString();
+            pending2FA.set(account.userId, { code, expires: Date.now() + 300000 });
+            
+            transporter.sendMail({
+                from: process.env.EMAIL_USER,
+                to: account.email,
+                subject: 'SecureChat - Код подтверждения',
+                text: `Ваш код: ${code}`
+            }).catch(err => console.log('Email error:', err));
+            
+            socket.emit('require2FA', { userId: account.userId, email: account.email.replace(/(.{3}).*(@.*)/, '$1***$2') });
+            return;
+        }
+
+        completeLogin(socket, account);
+    });
+
+    socket.on('verify2FA', (data) => {
+        const pending = pending2FA.get(data.userId);
+        if (pending && pending.code === data.code && Date.now() < pending.expires) {
+            pending2FA.delete(data.userId);
+            const account = getAccountByUserId(data.userId);
+            if (account) completeLogin(socket, account);
+        } else {
+            socket.emit('2FAError', { message: 'Неверный или истёкший код' });
+        }
+    });
+
+    socket.on('searchUsers', (data) => {
+        if (!socket.userId) return;
+        const query = data.query.toLowerCase();
+        const results = [];
+        
+        accounts.forEach((acc) => {
+            if (acc.userId !== socket.userId && 
+                (acc.username.toLowerCase().includes(query) || 
+                 acc.email.toLowerCase().includes(query))) {
+                results.push({
+                    userId: acc.userId,
+                    username: acc.username,
+                    avatar: acc.avatar,
+                    online: onlineUsers.has(acc.userId)
+                });
+            }
+        });
+        
+        socket.emit('searchResults', results);
+    });
+
+    socket.on('getChat', (data) => {
+        if (!socket.userId) return;
+        const peerId = data.peerId || data.chatId;
+        const chatId = [socket.userId, peerId].sort().join('_');
+        const account = getAccountByUserId(socket.userId);
+        if (!account) return;
+        const messages = account.chats.get(chatId) || [];
+        
+        // Сбрасываем непрочитанные
+        const chatInList = messages;
+        if (chatInList) {
+            const chat = account.chats.get(chatId);
+            if (chat) chat.unread = 0;
+        }
+        
+        socket.emit('chatMessages', { chatId, messages });
+    });
+
+    socket.on('sendMessage', (data) => {
+        if (!socket.userId) return;
+        const chatId = [socket.userId, data.to].sort().join('_');
+        const message = {
+            from: socket.userId,
+            fromName: socket.username,
+            to: data.to,
+            text: data.text || '',
+            type: data.type || 'text',
+            image: data.image || '',
+            timestamp: Date.now()
+        };
+
+        const senderAccount = getAccountByUserId(socket.userId);
+        if (senderAccount) {
+            if (!senderAccount.chats.has(chatId)) senderAccount.chats.set(chatId, []);
+            senderAccount.chats.get(chatId).push(message);
+        }
+
+        const receiverAccount = getAccountByUserId(data.to);
+        if (receiverAccount) {
+            if (!receiverAccount.chats.has(chatId)) receiverAccount.chats.set(chatId, []);
+            receiverAccount.chats.get(chatId).push(message);
+        }
+
+        const receiver = onlineUsers.get(data.to);
+        if (receiver) {
+            io.to(receiver.socketId).emit('newMessage', { chatId, message });
+        }
+
+        socket.emit('newMessage', { chatId, message });
+    });
+
+    socket.on('updateAvatar', (data) => {
+        if (!socket.userId) return;
+        const account = getAccountByUserId(socket.userId);
+        if (account) {
+            account.avatar = data.avatarUrl;
+            socket.avatar = data.avatarUrl;
+            io.emit('avatarUpdated', { userId: socket.userId, avatar: data.avatarUrl });
+        }
+    });
+
+    socket.on('updateEmail', (data) => {
+        if (!socket.userId) return;
+        const account = getAccountByUserId(socket.userId);
+        if (account && data.email.includes('@')) {
+            account.email = data.email;
+            socket.emit('emailUpdated');
+        }
+    });
+
+    socket.on('enable2FA', () => {
+        if (!socket.userId) return;
+        const account = getAccountByUserId(socket.userId);
+        if (account) {
+            account.twoFAEnabled = true;
+            socket.emit('2FAEnabled');
+        }
+    });
+
+    socket.on('logout', () => {
+        if (socket.userId) {
+            onlineUsers.delete(socket.userId);
+            broadcastOnlineUsers();
+        }
+    });
+
+    socket.on('disconnect', () => {
+        if (socket.userId) {
+            onlineUsers.delete(socket.userId);
+            broadcastOnlineUsers();
+        }
+    });
+});
+
+function completeLogin(socket, account) {
+    onlineUsers.set(account.userId, {
+        username: account.username,
+        socketId: socket.id,
+        avatar: account.avatar
+    });
+
+    socket.userId = account.userId;
+    socket.username = account.username;
+    socket.avatar = account.avatar;
+
+    const userChats = [];
+    account.chats.forEach((messages, chatId) => {
+        const parts = chatId.split('_');
+        const peerId = parts.find(p => p !== account.userId);
+        const peerAccount = Array.from(accounts.values()).find(a => a.userId === peerId);
+        const lastMsg = messages[messages.length - 1];
+        
+        userChats.push({
+            id: chatId,
+            with: peerAccount ? peerAccount.username : 'Unknown',
+            avatar: peerAccount ? peerAccount.avatar : '',
+            lastMessage: lastMsg ? (lastMsg.type === 'image' ? '📷 Фото' : lastMsg.text) : '',
+            lastTime: lastMsg ? lastMsg.timestamp : 0,
+            unread: 0
+        });
+    });
+
+    socket.emit('authSuccess', {
+        userId: account.userId,
+        username: account.username,
+        avatar: account.avatar,
+        email: account.email,
+        chats: userChats
+    });
+
+    broadcastOnlineUsers();
+}
+
+function getAccountByUserId(userId) {
+    for (const [key, account] of accounts) {
+        if (account.userId === userId) return account;
+    }
+    return null;
+}
+
+function broadcastOnlineUsers() {
+    const users = Array.from(onlineUsers.values()).map(u => ({
+        userId: Array.from(onlineUsers.entries()).find(([id]) => onlineUsers.get(id) === u)[0],
+        username: u.username
+    }));
+    io.emit('onlineUsers', users);
+}
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, '0.0.0.0', () => {
+    console.log('SecureChat server running on port ' + PORT);
+});
