@@ -11,7 +11,8 @@ if (!fs.existsSync(clientPath)) {
 }
 
 if (!fs.existsSync(indexPath)) {
-    const htmlContent = `<!DOCTYPE html>
+    const htmlContent = `
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -105,7 +106,7 @@ if (!fs.existsSync(indexPath)) {
     </script>
 </body>
 </html>`;
-    
-    fs.writeFileSync(indexPath, htmlContent);
+
+    fs.writeFileSync(indexPath, htmlContent, 'utf8');
     console.log('✅ Created client/index.html automatically');
 }
