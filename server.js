@@ -150,9 +150,7 @@ app.post('/edit-message', (req, res) => {
     const email = sessions.get(token);
     if (!email) return res.json({ error: 'Не авторизован' });
     
-    // Ищем в личных сообщениях
     let msg = messages.find(m => m.id === id);
-    // Ищем в группах
     if (!msg) msg = groupMessages.find(m => m.id === id);
     
     if (!msg) return res.json({ error: 'Сообщение не найдено' });
@@ -165,7 +163,6 @@ app.post('/edit-message', (req, res) => {
     msg.edited = true;
     msg.editedTime = Date.now();
     
-    // Отправляем через сокет
     if (msg.groupId) {
         io.to('group:' + msg.groupId).emit('messageEdited', { id, newText, edited: true, groupId: msg.groupId });
     } else if (online.has(msg.to)) {
@@ -229,7 +226,6 @@ app.get('/contacts', (req, res) => {
         if (m.to === email) contactsWithMessages.add(m.from);
     });
     
-    // Группы где я участник
     const myGroups = [];
     for (const [gid, group] of groups) {
         if (group.members.has(email)) {
@@ -301,13 +297,11 @@ app.get('/messages', (req, res) => {
         (m.from === email && m.to === withUser) || (m.from === withUser && m.to === email)
     );
     
-    // Отмечаем как прочитанные
     msgs.forEach(m => {
         if (m.to === email && !m.read) {
             m.read = true;
             m.readTime = Date.now();
             
-            // Уведомляем отправителя
             if (online.has(m.from)) {
                 io.to(online.get(m.from)).emit('messageRead', { id: m.id, read: true, readTime: m.readTime });
             }
@@ -337,12 +331,10 @@ app.get('/group-messages', (req, res) => {
     
     const msgs = groupMessages.filter(m => m.groupId === groupId);
     
-    // Отмечаем как прочитанные
     msgs.forEach(m => {
         if (!m.readBy.has(email)) {
             m.readBy.add(email);
             
-            // Уведомляем группу
             io.to('group:' + groupId).emit('messageRead', { 
                 id: m.id, 
                 groupId, 
@@ -380,7 +372,6 @@ app.post('/create-group', (req, res) => {
     const groupId = crypto.randomBytes(10).toString('hex');
     const memberSet = new Set([email, ...members]);
     
-    // Проверяем существование всех участников
     for (const member of memberSet) {
         if (!users.has(member) || !users.get(member).verified) {
             return res.json({ error: `Пользователь ${member} не найден` });
@@ -396,7 +387,6 @@ app.post('/create-group', (req, res) => {
         created: Date.now()
     });
     
-    // Уведомляем всех участников
     memberSet.forEach(member => {
         if (online.has(member)) {
             io.to(online.get(member)).emit('groupCreated', {
@@ -411,7 +401,6 @@ app.post('/create-group', (req, res) => {
         }
     });
     
-    // Первое системное сообщение
     const sysMsg = {
         id: crypto.randomBytes(8).toString('hex'),
         groupId,
@@ -500,7 +489,6 @@ io.on('connection', (socket) => {
         currentUser = email;
         online.set(email, socket.id);
         
-        // Вступаем в комнаты групп
         for (const [gid, group] of groups) {
             if (group.members.has(email)) {
                 socket.join('group:' + gid);
@@ -538,7 +526,7 @@ io.on('connection', (socket) => {
             groupId, from: currentUser, text,
             time: time || Date.now(), 
             type: type || 'text',
-            readBy: new Set([currentUser]) // Отправитель уже прочитал
+            readBy: new Set([currentUser])
         };
         groupMessages.push(msg);
         io.to('group:' + groupId).emit('groupMessage', msg);
@@ -547,7 +535,6 @@ io.on('connection', (socket) => {
     socket.on('readMessages', (data) => {
         const { chatWith } = data;
         
-        // Отмечаем личные сообщения
         messages.forEach(m => {
             if (m.to === currentUser && m.from === chatWith && !m.read) {
                 m.read = true;
@@ -756,7 +743,7 @@ app.get('/', (req, res) => {
         .chat-preview{color:var(--text-secondary);font-size:calc(14px * var(--fs));margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .online-dot{width:10px;height:10px;border-radius:50%;background:var(--success);position:absolute;bottom:2px;right:2px;border:2px solid var(--bg)}
         .chat-time{font-size:calc(12px * var(--fs));color:var(--text-secondary);flex-shrink:0;margin-left:8px}
-        .unread-badge{min-width:20px;height:20px;border-radius:10px;background:var(--danger);color:#fff;font-size:11px;display:flex;align-items:center;justify        .unread-badge{min-width:20px;height:20px;border-radius:10px;background:var(--danger);color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center;padding:0 6px;margin-top:4px;flex-shrink:0}
+        .unread-badge{min-width:20px;height:20px;border-radius:10px;background:var(--danger);color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center;padding:0 6px;margin-top:4px;flex-shrink:0}
         .fab{position:fixed;bottom:24px;right:16px;width:56px;height:56px;border-radius:50%;background:#0a84ff;color:#fff;border:0;font-size:28px;cursor:pointer;box-shadow:0 4px 12px rgba(10,132,255,0.4);z-index:50;display:flex;align-items:center;justify-content:center;transition:all 0.2s}.fab:active{transform:scale(0.9)}
         .fab.create-group{right:84px;background:#5e5ce6;box-shadow:0 4px 12px rgba(94,92,230,0.4)}
         .empty-state{text-align:center;padding:60px 32px;color:var(--text-secondary)}.empty-state .icon{font-size:48px;margin-bottom:16px}.empty-state p{font-size:calc(16px * var(--fs));margin-bottom:8px}
@@ -794,7 +781,7 @@ app.get('/', (req, res) => {
         .group-member-chip .mini-avatar img{width:100%;height:100%;object-fit:cover}
         .call-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);z-index:200;flex-direction:column;align-items:center;justify-content:center;gap:24px}
         .call-overlay.active{display:flex}
-        .call-avatar{width:100px;height:100px;border-radius:50%;background:linear-gradient(135deg,#0a84ff,#5e5ce6);display:flex;align-items:center;just-content:center;font-size:50px;color:#fff;overflow:hidden}
+        .call-avatar{width:100px;height:100px;border-radius:50%;background:linear-gradient(135deg,#0a84ff,#5e5ce6);display:flex;align-items:center;justify-content:center;font-size:50px;color:#fff;overflow:hidden}
         .call-avatar img{width:100%;height:100%;object-fit:cover}
         .call-name{color:#fff;font-size:calc(24px * var(--fs));font-weight:600}
         .call-status{color:var(--text-secondary);font-size:calc(16px * var(--fs))}
@@ -834,7 +821,6 @@ app.get('/', (req, res) => {
     </style>
 </head>
 <body>
-    <!-- Экраны -->
     <div id="login-screen" class="screen active">
         <div class="container">
             <div class="logo">💬</div>
@@ -916,7 +902,6 @@ app.get('/', (req, res) => {
         <div class="container" id="settings-content"></div>
     </div>
     
-    <!-- Модальные окна -->
     <div class="modal" id="new-chat-modal">
         <div class="modal-content">
             <div class="modal-handle"></div>
@@ -1012,7 +997,6 @@ app.get('/', (req, res) => {
             socket.on('message', (msg) => {
                 if (currentChat === msg.from) {
                     addMessage(msg);
-                    // Отмечаем как прочитанное
                     socket.emit('readMessages', { chatWith: msg.from });
                 }
                 loadContacts();
@@ -1050,7 +1034,6 @@ app.get('/', (req, res) => {
             });
             
             socket.on('groupMessagesRead', (data) => {
-                // Обновляем счетчик прочитавших в группе
                 if (currentGroup === data.groupId) {
                     updateGroupReadStatus(data.groupId);
                 }
@@ -1168,7 +1151,6 @@ app.get('/', (req, res) => {
                 document.getElementById('login-error').className = 'success';
                 document.getElementById('login-error').textContent = 'Код отправлен в Telegram бот!';
                 
-                // Переходим к 2FA
                 localStorage.setItem('pendingEmail', email);
                 setTimeout(() => showScreen('2fa'), 1500);
             }
@@ -1232,7 +1214,6 @@ app.get('/', (req, res) => {
             localStorage.setItem('myEmail', myEmail);
             localStorage.removeItem('pendingEmail');
             
-            // Применяем тему
             if (myProfile) {
                 const theme = myProfile.theme || getSavedTheme();
                 const wallpaper = myProfile.wallpaper || getSavedWallpaper();
@@ -1275,7 +1256,6 @@ app.get('/', (req, res) => {
             const container = document.getElementById('chats-list');
             container.innerHTML = '';
             
-            // Группы
             if (data.groups && data.groups.length > 0) {
                 const groupsSection = document.createElement('div');
                 groupsSection.className = 'settings-section-title';
@@ -1289,7 +1269,8 @@ app.get('/', (req, res) => {
                 });
             }
             
-            // Чаты (те у            const activeChats = data.contacts.filter(c => c.hasMessages);
+            // Чаты (те у кого есть сообщения)
+            const activeChats = data.contacts.filter(c => c.hasMessages);
             const otherChats = data.contacts.filter(c => !c.hasMessages);
             
             if (activeChats.length > 0) {
@@ -1319,13 +1300,13 @@ app.get('/', (req, res) => {
             }
             
             if (activeChats.length === 0 && otherChats.length === 0 && (!data.groups || data.groups.length === 0)) {
-                container.innerHTML = `
+                container.innerHTML = \`
                     <div class="empty-state">
                         <div class="icon">👋</div>
                         <p>Нет чатов</p>
                         <p style="color:var(--text-secondary);font-size:14px">Нажмите + чтобы найти пользователя</p>
                     </div>
-                `;
+                \`;
             }
         }
         
@@ -1340,16 +1321,16 @@ app.get('/', (req, res) => {
             const prefix = isMyMsg ? 'Вы: ' : '';
             const readStatus = lastMsg && isMyMsg ? (lastMsg.read ? ' ✓✓' : ' ✓') : '';
             
-            div.innerHTML = `
-                <div class="avatar">${contact.avatar ? '<img src="'+contact.avatar+'">' : '👤'}</div>
+            div.innerHTML = \`
+                <div class="avatar">\${contact.avatar ? '<img src="'+contact.avatar+'">' : '👤'}</div>
                 <div class="chat-info">
-                    <div class="chat-name">${contact.nickname || contact.email}${readStatus ? '<span style="color:#0a84ff;font-size:12px">'+readStatus+'</span>' : ''}</div>
-                    <div class="chat-preview">${prefix}${lastText}</div>
-                    ${contact.unread > 0 ? '<div class="unread-badge">'+contact.unread+'</div>' : ''}
+                    <div class="chat-name">\${contact.nickname || contact.email}\${readStatus ? '<span style="color:#0a84ff;font-size:12px">'+readStatus+'</span>' : ''}</div>
+                    <div class="chat-preview">\${prefix}\${lastText}</div>
+                    \${contact.unread > 0 ? '<div class="unread-badge">'+contact.unread+'</div>' : ''}
                 </div>
-                ${timeStr ? '<div class="chat-time">'+timeStr+'</div>' : ''}
-                ${contact.online ? '<div class="online-dot" style="position:static;width:8px;height:8px;margin-left:6px"></div>' : ''}
-            `;
+                \${timeStr ? '<div class="chat-time">'+timeStr+'</div>' : ''}
+                \${contact.online ? '<div class="online-dot" style="position:static;width:8px;height:8px;margin-left:6px"></div>' : ''}
+            \`;
             
             div.onclick = () => openChat(contact.email);
             return div;
@@ -1363,23 +1344,22 @@ app.get('/', (req, res) => {
             const lastText = lastMsg ? (lastMsg.text || '') : '';
             const timeStr = lastMsg ? formatTime(lastMsg.time) : '';
             
-            div.innerHTML = `
-                <div class="avatar group-avatar">${group.avatar ? '<img src="'+group.avatar+'">' : '👥'}</div>
+            div.innerHTML = \`
+                <div class="avatar group-avatar">\${group.avatar ? '<img src="'+group.avatar+'">' : '👥'}</div>
                 <div class="chat-info">
-                    <div class="chat-name">${group.name} <span style="font-size:12px;color:var(--text-secondary)">(${group.members ? group.members.length : ''})</span></div>
-                    <div class="chat-preview">${lastText}</div>
-                    ${group.unread > 0 ? '<div class="unread-badge">'+group.unread+'</div>' : ''}
+                    <div class="chat-name">\${group.name} <span style="font-size:12px;color:var(--text-secondary)">(\${group.members ? group.members.length : ''})</span></div>
+                    <div class="chat-preview">\${lastText}</div>
+                    \${group.unread > 0 ? '<div class="unread-badge">'+group.unread+'</div>' : ''}
                 </div>
-                ${timeStr ? '<div class="chat-time">'+timeStr+'</div>' : ''}
-            `;
+                \${timeStr ? '<div class="chat-time">'+timeStr+'</div>' : ''}
+            \`;
             
             div.onclick = () => openGroup(group.id);
             return div;
         }
         
         function updateUnreadBadge() {
-            // Можно добавить обновление счетчика непрочитанных в заголовке
-            if (currentChat || currentGroup) return; // Не обновляем если в чате
+            if (currentChat || currentGroup) return; 
             loadContacts();
         }
         
@@ -1409,16 +1389,16 @@ app.get('/', (req, res) => {
             if (data.error) {
                 document.getElementById('search-error').textContent = data.error;
             } else if (data.found) {
-                document.getElementById('search-result').innerHTML = `
-                    <div class="chat-item" onclick="openChat('${data.email}');closeModal('new-chat-modal')">
-                        <div class="avatar">${data.avatar ? '<img src="'+data.avatar+'">' : '👤'}</div>
+                document.getElementById('search-result').innerHTML = \`
+                    <div class="chat-item" onclick="openChat('\${data.email}');closeModal('new-chat-modal')">
+                        <div class="avatar">\${data.avatar ? '<img src="'+data.avatar+'">' : '👤'}</div>
                         <div class="chat-info">
-                            <div class="chat-name">${data.nickname || data.email}</div>
-                            <div class="chat-preview">${data.status || ''}</div>
+                            <div class="chat-name">\${data.nickname || data.email}</div>
+                            <div class="chat-preview">\${data.status || ''}</div>
                         </div>
-                        ${data.online ? '<div class="online-dot" style="position:static;width:8px;height:8px;margin-left:6px"></div>' : ''}
+                        \${data.online ? '<div class="online-dot" style="position:static;width:8px;height:8px;margin-left:6px"></div>' : ''}
                     </div>
-                `;
+                \`;
             }
         }
         
@@ -1468,31 +1448,30 @@ app.get('/', (req, res) => {
             const inner = document.getElementById('group-info-inner');
             document.getElementById('group-modal').classList.add('active');
             
-            // Загружаем информацию о группе
             request('/group-messages?token='+token+'&groupId='+currentGroup).then(data => {
                 if (data.group) {
                     const group = data.group;
-                    inner.innerHTML = `
+                    inner.innerHTML = \`
                         <div style="text-align:center;margin-bottom:16px">
-                            <div class="avatar group-avatar" style="width:60px;height:60px;font-size:28px;margin:0 auto 8px">${group.avatar ? '<img src="'+group.avatar+'">' : '👥'}</div>
-                            <div style="font-weight:600;font-size:calc(18px * var(--fs))">${group.name}</div>
-                            <div style="color:var(--text-secondary);font-size:13px">${group.members.length} участников</div>
+                            <div class="avatar group-avatar" style="width:60px;height:60px;font-size:28px;margin:0 auto 8px">\${group.avatar ? '<img src="'+group.avatar+'">' : '👥'}</div>
+                            <div style="font-weight:600;font-size:calc(18px * var(--fs))">\${group.name}</div>
+                            <div style="color:var(--text-secondary);font-size:13px">\${group.members.length} участников</div>
                         </div>
                         <div class="settings-section-title">Участники</div>
                         <div class="group-members-list">
-                            ${group.members.map(m => `
+                            \${group.members.map(m => \`
                                 <div class="group-member-chip">
-                                    <div class="mini-avatar">${m.avatar ? '<img src="'+m.avatar+'">' : '👤'}</div>
-                                    <span>${m.nickname || m.email}</span>
-                                    ${m.online ? '<div class="online-dot" style="position:static;width:6px;height:6px"></div>' : ''}
+                                    <div class="mini-avatar">\${m.avatar ? '<img src="'+m.avatar+'">' : '👤'}</div>
+                                    <span>\${m.nickname || m.email}</span>
+                                    \${m.online ? '<div class="online-dot" style="position:static;width:6px;height:6px"></div>' : ''}
                                 </div>
-                            `).join('')}
+                            \`).join('')}
                         </div>
                         <div class="input-group" style="margin-top:16px">
                             <input type="email" id="add-member-input" placeholder="Email для добавления">
                         </div>
                         <button class="btn btn-primary" onclick="addMemberToGroup()" style="margin-top:8px">Добавить участника</button>
-                    `;
+                    \`;
                     modal.classList.add('active');
                 }
             });
@@ -1591,7 +1570,7 @@ app.get('/', (req, res) => {
         function addMessage(msg) {
             const container = document.getElementById('chat-messages');
             const existing = document.getElementById('msg-' + msg.id);
-            if (existing) return; // Не дублируем
+            if (existing) return; 
             
             const isMine = msg.from === myEmail;
             const isSystem = msg.from === 'system';
@@ -1604,30 +1583,29 @@ app.get('/', (req, res) => {
             const bubbleText = msg.deleted ? 'Сообщение удалено' : (msg.type === 'heart' ? '❤️' : msg.type === 'like' ? '👍' : msg.type === 'fire' ? '🔥' : msg.type === 'rocket' ? '🚀' : msg.type === 'laugh' ? '😂' : msg.type === 'love' ? '😍' : msg.text);
             const bubbleClass = 'message-bubble ' + (msg.deleted ? 'deleted' : '') + (msg.edited ? ' edited-badge' : '') + (msg.type && msg.type !== 'text' ? ' ' + msg.type : '');
             
-            // Отправитель в группе
             let senderHtml = '';
             if (isGroup && !isMine && !isSystem && msg.from) {
                 const sender = msg.from;
                 senderHtml = '<div class="group-message-sender">' + (sender) + '</div>';
             }
             
-            row.innerHTML = `
-                ${senderHtml}
-                <div class="message-bubble ${bubbleClass}">${bubbleText}</div>
+            row.innerHTML = \`
+                \${senderHtml}
+                <div class="message-bubble \${bubbleClass}">\${bubbleText}</div>
                 <div class="message-time">
-                    ${formatTime(msg.time)}
-                    ${msg.edited ? '<span class="edited-label">изм.</span>' : ''}
+                    \${formatTime(msg.time)}
+                    \${msg.edited ? '<span class="edited-label">изм.</span>' : ''}
                 </div>
-                <div class="message-read-status" id="read-status-${msg.id}">
-                    ${getReadStatus(msg)}
+                <div class="message-read-status" id="read-status-\${msg.id}">
+                    \${getReadStatus(msg)}
                 </div>
-                ${isMine && !isSystem ? `
+                \${isMine && !isSystem ? \`
                     <div class="message-actions">
-                        <button class="action-btn" onclick="startEditMessage('${msg.id}','${escapeHtml(bubbleText)}')">✎</button>
-                        <button class="action-btn" onclick="deleteMessage('${msg.id}')">✕</button>
+                        <button class="action-btn" onclick="startEditMessage('\${msg.id}','\${escapeHtml(bubbleText)}')">✎</button>
+                        <button class="action-btn" onclick="deleteMessage('\${msg.id}')">✕</button>
                     </div>
-                ` : ''}
-            `;
+                \` : ''}
+            \`;
             
             container.appendChild(row);
             scrollToBottom();
@@ -1666,11 +1644,7 @@ app.get('/', (req, res) => {
         }
         
         function updateGroupReadStatus(groupId) {
-            // Обновить счетчики прочитавших в группе
             const statusEls = document.querySelectorAll('[id^="read-status-"]');
-            statusEls.forEach(el => {
-                // Обновление происходит при следующей загрузке сообщений
-            });
         }
         
         function sendMessage() {
@@ -1693,7 +1667,6 @@ app.get('/', (req, res) => {
             }
             
             input.value = '';
-            // Скрываем эффекты после отправки
             document.getElementById('effects-bar').style.display = 'none';
         }
         
@@ -1766,7 +1739,6 @@ app.get('/', (req, res) => {
             document.getElementById('edit-message-input').value = text;
             document.getElementById('edit-message-input').focus();
             
-            // Скроллим к сообщению
             const el = document.getElementById('msg-' + id);
             if (el) el.scrollIntoView({ behavior: 'smooth' });
         }
@@ -1793,34 +1765,33 @@ app.get('/', (req, res) => {
         
         async function deleteMessage(id) {
             if (!confirm('Удалить сообщение?')) return;
-            
             socket.emit('deleteMessage', { id });
         }
         
         // ========== ПРОФИЛЬ И НАСТРОЙКИ ==========
         function loadSettingsUI() {
             const container = document.getElementById('settings-content');
-            container.innerHTML = `
+            container.innerHTML = \`
                 <div class="profile-header">
                     <div class="profile-avatar" onclick="document.getElementById('avatar-input').click()">
-                        ${myProfile && myProfile.avatar ? '<img src="'+myProfile.avatar+'">' : '👤'}
+                        \${myProfile && myProfile.avatar ? '<img src="'+myProfile.avatar+'">' : '👤'}
                         <div class="profile-avatar-overlay">📷</div>
                     </div>
                     <input type="file" id="avatar-input" class="file-input-hidden" accept="image/*" onchange="uploadAvatar(event)">
-                    <div class="profile-nickname">${myProfile ? myProfile.nickname : ''}</div>
-                    <div class="profile-status">${myProfile ? myProfile.status : ''}</div>
+                    <div class="profile-nickname">\${myProfile ? myProfile.nickname : ''}</div>
+                    <div class="profile-status">\${myProfile ? myProfile.status : ''}</div>
                 </div>
                 
                 <div class="settings-section">
                     <div class="settings-section-title">Профиль</div>
                     <div class="settings-item" onclick="editNickaname()">
                         <span class="settings-label">Имя</span>
-                        <span class="settings-value">${myProfile ? myProfile.nickname : ''}</span>
+                        <span class="settings-value">\${myProfile ? myProfile.nickname : ''}</span>
                         <span class="settings-arrow">›</span>
                     </div>
                     <div class="settings-item" onclick="editStatus()">
                         <span class="settings-label">Статус</span>
-                        <span class="settings-value">${myProfile ? myProfile.status : ''}</span>
+                        <span class="settings-value">\${myProfile ? myProfile.status : ''}</span>
                         <span class="settings-arrow">›</span>
                     </div>
                 </div>
@@ -1829,16 +1800,16 @@ app.get('/', (req, res) => {
                     <div class="settings-section-title">Оформление</div>
                     <div class="settings-item" onclick="toggleTheme()">
                         <span class="settings-label">Тёмная тема</span>
-                        <div class="toggle ${document.body.classList.contains('dark') ? 'active' : ''}" id="theme-toggle"></div>
+                        <div class="toggle \${document.body.classList.contains('dark') ? 'active' : ''}" id="theme-toggle"></div>
                     </div>
                     <div class="settings-item" onclick="showWallpaperModal()">
                         <span class="settings-label">Обои</span>
-                        <span class="settings-value">${getWallpaperName()}</span>
+                        <span class="settings-value">\${getWallpaperName()}</span>
                         <span class="settings-arrow">›</span>
                     </div>
                     <div class="settings-item" onclick="showFontSizeModal()">
                         <span class="settings-label">Размер шрифта</span>
-                        <span class="settings-value">${getFontSizeName()}</span>
+                        <span class="settings-value">\${getFontSizeName()}</span>
                         <span class="settings-arrow">›</span>
                     </div>
                 </div>
@@ -1847,7 +1818,7 @@ app.get('/', (req, res) => {
                     <div class="settings-section-title">Уведомления</div>
                     <div class="settings-item" onclick="toggleSound()">
                         <span class="settings-label">Звук</span>
-                        <div class="toggle ${myProfile && myProfile.sound !== false ? 'active' : ''}" id="sound-toggle"></div>
+                        <div class="toggle \${myProfile && myProfile.sound !== false ? 'active' : ''}" id="sound-toggle"></div>
                     </div>
                 </div>
                 
@@ -1856,7 +1827,7 @@ app.get('/', (req, res) => {
                         <span class="settings-label" style="text-align:center;color:var(--danger)">Выйти</span>
                     </div>
                 </div>
-            `;
+            \`;
         }
         
         function getWallpaperName() {
@@ -1949,20 +1920,20 @@ app.get('/', (req, res) => {
             const modal = document.createElement('div');
             modal.className = 'modal active';
             modal.id = 'wallpaper-modal';
-            modal.innerHTML = `
+            modal.innerHTML = \`
                 <div class="modal-content">
                     <div class="modal-handle"></div>
                     <div class="modal-title">Выберите обои</div>
                     <div class="wallpaper-grid">
-                        ${wallpapers.map(w => `
-                            <div class="wallpaper-option ${w.id === currentWallpaper ? 'selected' : ''}" 
-                                 style="background:${w.gradient}" 
-                                 onclick="selectWallpaper('${w.id}')">${w.name}</div>
-                        `).join('')}
+                        \${wallpapers.map(w => \`
+                            <div class="wallpaper-option \${w.id === currentWallpaper ? 'selected' : ''}" 
+                                 style="background:\${w.gradient}" 
+                                 onclick="selectWallpaper('\${w.id}')">\${w.name}</div>
+                        \`).join('')}
                     </div>
                     <button class="btn btn-secondary" onclick="document.getElementById('wallpaper-modal').remove()">Закрыть</button>
                 </div>
-            `;
+            \`;
             document.body.appendChild(modal);
         }
         
@@ -1990,19 +1961,19 @@ app.get('/', (req, res) => {
             const modal = document.createElement('div');
             modal.className = 'modal active';
             modal.id = 'fontsize-modal';
-            modal.innerHTML = `
+            modal.innerHTML = \`
                 <div class="modal-content">
                     <div class="modal-handle"></div>
                     <div class="modal-title">Размер шрифта</div>
                     <div class="font-size-btns" style="display:flex;gap:8px;justify-content:center">
-                        ${sizes.map(s => `
-                            <button class="font-size-btn ${s.id === currentFont ? 'selected' : ''}" 
-                                    onclick="selectFontSize('${s.id}')">${s.label}</button>
-                        `).join('')}
+                        \${sizes.map(s => \`
+                            <button class="font-size-btn \${s.id === currentFont ? 'selected' : ''}" 
+                                    onclick="selectFontSize('\${s.id}')">\${s.label}</button>
+                        \`).join('')}
                     </div>
                     <button class="btn btn-secondary" onclick="document.getElementById('fontsize-modal').remove()" style="margin-top:16px">Закрыть</button>
                 </div>
-            `;
+            \`;
             document.body.appendChild(modal);
         }
         
@@ -2078,10 +2049,10 @@ app.get('/', (req, res) => {
             document.getElementById('call-overlay').classList.add('active');
             document.getElementById('call-name').textContent = data.nickname || data.from;
             document.getElementById('call-status').textContent = 'Входящий звонок...';
-            document.getElementById('call-buttons').innerHTML = `
-                <button class="call-btn call-btn-reject" onclick="rejectCall('${data.callId}')">📞</button>
-                <button class="call-btn call-btn-accept" onclick="acceptCall('${data.callId}')">📞</button>
-            `;
+            document.getElementById('call-buttons').innerHTML = \`
+                <button class="call-btn call-btn-reject" onclick="rejectCall('\${data.callId}')">📞</button>
+                <button class="call-btn call-btn-accept" onclick="acceptCall('\${data.callId}')">📞</button>
+            \`;
             
             currentCallId = data.callId;
             currentCallWith = data.from;
@@ -2162,7 +2133,7 @@ app.get('/', (req, res) => {
                 if (isCaller) {
                     const offer = await peerConnection.createOffer();
                     await peerConnection.setLocalDescription(offer);
-                    socket.emit('webrtcsocket.emit('webrtcOffer', { to: currentCallWith, offer });
+                    socket.emit('webrtcOffer', { to: currentCallWith, offer });
                 }
             } catch(e) {
                 console.error('WebRTC error:', e);
@@ -2235,9 +2206,7 @@ app.get('/', (req, res) => {
             setTimeout(() => toast.remove(), 2500);
         }
         
-        // Закрытие модалок по клику вне
         document.addEventListener('click', function(e) {
-            // Закрываем если кликнули на фон модалки
             document.querySelectorAll('.modal.active').forEach(modal => {
                 if (e.target === modal) {
                     modal.classList.remove('active');
