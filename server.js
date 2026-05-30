@@ -208,9 +208,11 @@ app.get('/find-user', (req, res) => {
     if (!myEmail) return res.json({ error: 'Не авторизован' });
     if (searchEmail === myEmail) return res.json({ error: 'Это вы' });
     
-    const user = users.get(searchEmail);
-    // ВОТ ЭТА СТРОЧКА ВЫЗЫВАЕТ ОШИБКУ:
-    if (!user || !user.verified) return res.json({ error: 'Пользователь не найден' });
+    // 1. Приводим поиск к нижнему регистру и убираем лишние пробелы
+    const user = users.get(searchEmail.toLowerCase().trim());
+    
+    // 2. Убираем условие !user.verified, если хотите находить и не верифицированных пользователей
+    if (!user) return res.json({ error: 'Пользователь не найден' });
     
     res.json({ 
         found: true, 
@@ -218,7 +220,7 @@ app.get('/find-user', (req, res) => {
         nickname: user.nickname, 
         avatar: user.avatar, 
         status: user.status, 
-        online: online.has(searchEmail) 
+        online: online.has(searchEmail.toLowerCase().trim()) // Также проверяем статус по корректному email
     });
 });
 app.get('/contacts', (req, res) => {
