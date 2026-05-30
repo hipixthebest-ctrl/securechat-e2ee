@@ -209,6 +209,7 @@ app.get('/find-user', (req, res) => {
     if (searchEmail === myEmail) return res.json({ error: 'Это вы' });
     
     const user = users.get(searchEmail);
+    // ВОТ ЭТА СТРОЧКА ВЫЗЫВАЕТ ОШИБКУ:
     if (!user || !user.verified) return res.json({ error: 'Пользователь не найден' });
     
     res.json({ 
@@ -220,7 +221,6 @@ app.get('/find-user', (req, res) => {
         online: online.has(searchEmail) 
     });
 });
-
 app.get('/contacts', (req, res) => {
     const token = req.query.token;
     const email = sessions.get(token);
