@@ -74,15 +74,17 @@ function sendToTelegram(code, email) {
 
 // ========== API ==========
 app.post('/register', (req, res) => {
-    const { email, password } = req.body;
+    let { email, password } = req.body;
     if (!email || !password) return res.json({ error: 'Email и пароль обязательны' });
+    email = email.toLowerCase().trim();
     if (users.has(email)) return res.json({ error: 'Пользователь уже существует' });
     
     const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const { nickname: nicknameInput } = req.body;
     users.set(email, {
         password: crypto.createHash('sha256').update(password).digest('hex'),
         code2FA: code, verified: false, token: null,
-        avatar: null, theme: 'dark', nickname: email.split('@')[0],
+        avatar: null, theme: 'dark', nickname: nicknameInput || email.split('@')[0],
         status: 'Привет! Я в Messages ✌️', fontSize: 'medium',
         sound: true, notifications: true, wallpaper: 'gradient1'
     });
@@ -92,7 +94,8 @@ app.post('/register', (req, res) => {
 });
 
 app.post('/verify', (req, res) => {
-    const { email, code } = req.body;
+    let { email, code } = req.body;
+    email = (email || '').toLowerCase().trim();
     const user = users.get(email);
     if (!user || user.code2FA !== code) return res.json({ error: 'Неверный код' });
     
@@ -104,7 +107,8 @@ app.post('/verify', (req, res) => {
 });
 
 app.post('/login', (req, res) => {
-    const { email, password } = req.body;
+    let { email, password } = req.body;
+    email = (email || '').toLowerCase().trim();
     const user = users.get(email);
     if (!user || user.password !== crypto.createHash('sha256').update(password).digest('hex')) 
         return res.json({ error: 'Неверный email или пароль' });
@@ -116,7 +120,8 @@ app.post('/login', (req, res) => {
 });
 
 app.post('/verify-2fa', (req, res) => {
-    const { email, code } = req.body;
+    let { email, code } = req.body;
+    email = (email || '').toLowerCase().trim();
     const user = users.get(email);
     if (!user || user.code2FA !== code) return res.json({ error: 'Неверный код' });
     
@@ -147,14 +152,8 @@ app.post('/update-profile', (req, res) => {
 
 app.post('/edit-message', (req, res) => {
     const { token, id, newText } = req.body;
-    // Приводим email к нижнему регистру при поиске
-const user = users.get(searchEmail.toLowerCase().trim());
-
-// Если пользователь не найден — пишем об этом
-if (!user) return res.json({ error: 'Пользователь не найден' });
-
-// Если нужно, чтобы искались только верифицированные, оставьте !user.verified, 
-// но убедитесь, что вы поставили user.verified = true при успешной 2FA.
+    const email = sessions.get(token);
+    if (!email) return res.json({ error: 'Не авторизован' });
     
     let msg = messages.find(m => m.id === id);
     if (!msg) msg = groupMessages.find(m => m.id === id);
@@ -456,7 +455,8 @@ app.post('/add-group-members', (req, res) => {
                         avatar: users.get(e)?.avatar
                     }))
                 });
-                online.get(member).join('group:' + groupId);
+                const memberSocket = io.sockets.sockets.get(online.get(member));
+                if (memberSocket) memberSocket.join('group:' + groupId);
             }
         }
     }
@@ -473,7 +473,14 @@ app.post('/add-group-members', (req, res) => {
     groupMessages.push(sysMsg);
     io.to('group:' + groupId).emit('groupMessage', sysMsg);
     
-    res.json({ success: true, group });
+    res.json({ success: true, group: {
+        id: group.id,
+        name: group.name,
+        avatar: group.avatar,
+        members: [...group.members],
+        createdBy: group.createdBy,
+        created: group.created
+    } });
 });
 
 function getUserData(email) {
@@ -493,7 +500,17 @@ const io = new Server(server, { cors: { origin: "*" } });
 io.on('connection', (socket) => {
     let currentUser = null;
     
-    socket.on('join', (email) => {
+    socket.on('join', (data) => {
+        // Поддерживаем как старый формат (просто email), так и новый {email, token}
+        const email = typeof data === 'string' ? data : data?.email;
+        const tkn = typeof data === 'object' ? data?.token : null;
+        
+        // Если token передан — верифицируем, иначе принимаем как есть (обратная совместимость)
+        if (tkn && sessions.get(tkn) !== email) {
+            socket.emit('error', { message: 'Недействительный токен' });
+            return;
+        }
+        
         currentUser = email;
         online.set(email, socket.id);
         
@@ -508,13 +525,15 @@ io.on('connection', (socket) => {
     });
     
     socket.on('message', (data) => {
+        if (!currentUser) return;
         const { to, text, time, type } = data;
         const msg = {
             id: crypto.randomBytes(8).toString('hex'),
             from: currentUser, to, text,
             time: time || Date.now(), 
             type: type || 'text',
-            read: false
+            read: false,
+            replyTo: data.replyTo || null
         };
         messages.push(msg);
         
@@ -610,6 +629,7 @@ io.on('connection', (socket) => {
     });
     
     socket.on('callRequest', (data) => {
+        if (!currentUser) return;
         const { to } = data;
         const callId = crypto.randomBytes(8).toString('hex');
         callRequests.set(callId, { id: callId, from: currentUser, to, status: 'ringing', time: Date.now() });
@@ -657,24 +677,54 @@ io.on('connection', (socket) => {
     });
     
     socket.on('webrtcOffer', (data) => {
+        if (!currentUser) return;
         if (online.has(data.to)) {
             io.to(online.get(data.to)).emit('webrtcOffer', { from: currentUser, offer: data.offer });
         }
     });
     
     socket.on('webrtcAnswer', (data) => {
+        if (!currentUser) return;
         if (online.has(data.to)) {
             io.to(online.get(data.to)).emit('webrtcAnswer', { from: currentUser, answer: data.answer });
         }
     });
     
     socket.on('webrtcIce', (data) => {
+        if (!currentUser) return;
         if (online.has(data.to)) {
             io.to(online.get(data.to)).emit('webrtcIce', { from: currentUser, candidate: data.candidate });
         }
     });
     
+    socket.on('messageReaction', (data) => {
+        if (!currentUser) return;
+        const { msgId, emoji } = data;
+        // Находим сообщение
+        let msg = messages.find(m => m.id === msgId);
+        if (!msg) msg = groupMessages.find(m => m.id === msgId);
+        if (!msg) return;
+
+        if (!msg.reactions) msg.reactions = [];
+        const existing = msg.reactions.find(r => r.user === currentUser && r.emoji === emoji);
+        if (existing) {
+            msg.reactions = msg.reactions.filter(r => !(r.user === currentUser && r.emoji === emoji));
+        } else {
+            msg.reactions.push({ user: currentUser, emoji });
+        }
+
+        const payload = { msgId, reactions: msg.reactions };
+        if (msg.groupId) {
+            io.to('group:' + msg.groupId).emit('messageReactions', payload);
+        } else {
+            [msg.from, msg.to].forEach(u => {
+                if (u && online.has(u)) io.to(online.get(u)).emit('messageReactions', payload);
+            });
+        }
+    });
+
     socket.on('typing', (to) => {
+        if (!currentUser) return;
         if (online.has(to)) {
             io.to(online.get(to)).emit('typing', {
                 user: currentUser,
@@ -826,19 +876,82 @@ app.get('/', (req, res) => {
         .checkbox-group{display:flex;flex-direction:column;gap:8px;margin:12px 0}
         .checkbox-item{display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px;cursor:pointer;transition:background 0.1s}.checkbox-item:active{background:var(--surface2)}
         .checkbox-item input[type=checkbox]{width:20px;height:20px;accent-color:#0a84ff}
+        /* Auth tabs */
+        .auth-tabs{display:flex;background:var(--surface2);border-radius:10px;padding:2px;margin-bottom:24px;width:100%;max-width:340px}
+        .auth-tab{flex:1;padding:8px;border:0;border-radius:8px;background:0;color:var(--text-secondary);font-size:calc(15px * var(--fs));font-weight:600;cursor:pointer;transition:all 0.2s}
+        .auth-tab.active{background:var(--surface);color:var(--text);box-shadow:0 1px 4px rgba(0,0,0,0.2)}
+        #auth-login-form{width:100%;max-width:340px}
+        .pw-toggle{position:absolute;right:12px;top:50%;transform:translateY(-50%);background:0;border:0;font-size:18px;cursor:pointer;padding:4px;opacity:0.6}
+        .pw-toggle:active{opacity:1}
+        /* Поиск в списке чатов */
+        .search-bar{padding:8px 12px;background:var(--bg);border-bottom:0.5px solid var(--border);position:sticky;top:0;z-index:5}
+        .search-bar input{width:100%;padding:9px 14px 9px 36px;border-radius:10px;border:0;background:var(--surface2);color:var(--text);font-size:calc(15px * var(--fs));outline:0}
+        .search-bar-wrap{position:relative}.search-bar-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:16px;pointer-events:none}
+        /* Пересылка */
+        .forward-bar{background:var(--surface2);border-left:3px solid #5e5ce6;padding:8px 12px;font-size:calc(13px * var(--fs));display:flex;justify-content:space-between;align-items:center;margin:0 8px 4px;border-radius:0 8px 8px 0}
+        /* Реакции на сообщения */
+        .msg-reactions{display:flex;flex-wrap:wrap;gap:3px;margin-top:2px}
+        .reaction-chip{background:var(--surface2);border-radius:12px;padding:2px 6px;font-size:14px;cursor:pointer;border:1px solid transparent;transition:all 0.15s}
+        .reaction-chip:active{background:var(--bubble-sent);color:#fff}
+        .reaction-chip.mine{border-color:#0a84ff;background:rgba(10,132,255,0.15)}
+        .reaction-picker{display:flex;gap:6px;padding:8px 12px;background:var(--surface);border-radius:20px;box-shadow:0 4px 20px rgba(0,0,0,0.3);position:fixed;z-index:200;animation:popIn 0.2s ease-out}
+        @keyframes popIn{from{opacity:0;transform:scale(0.8)}to{opacity:1;transform:scale(1)}}
+        /* Контекстное меню */
+        .ctx-menu{position:fixed;background:var(--surface);border-radius:14px;box-shadow:0 8px 32px rgba(0,0,0,0.4);z-index:300;min-width:180px;overflow:hidden;animation:popIn 0.15s ease-out}
+        .ctx-item{display:flex;align-items:center;gap:10px;padding:13px 16px;cursor:pointer;transition:background 0.1s;font-size:calc(15px * var(--fs))}
+        .ctx-item:active{background:var(--surface2)}.ctx-item.danger{color:var(--danger)}
+        .ctx-divider{height:0.5px;background:var(--border);margin:2px 0}
+        /* Индикатор непрочитанных в шапке чата */
+        .unread-pill{background:var(--danger);color:#fff;border-radius:12px;padding:2px 8px;font-size:11px;font-weight:700}
+        /* Password strength */
+        .password-strength{height:4px;border-radius:2px;background:var(--border);margin:-8px 0 12px;overflow:hidden;max-width:340px;width:100%}
+        .pw-bar{height:100%;border-radius:2px;transition:width 0.3s,background 0.3s}
+        /* Пересылка выбора чата */
+        .forward-modal-list{max-height:60vh;overflow-y:auto}
+        .forward-item{display:flex;align-items:center;padding:10px 16px;cursor:pointer;gap:12px;transition:background 0.1s}
+        .forward-item:active{background:var(--surface2)}
+        /* Scroll-to-bottom */
+        .scroll-btn{position:absolute;bottom:80px;right:12px;width:36px;height:36px;border-radius:50%;background:var(--surface);border:0.5px solid var(--border);box-shadow:0 2px 8px rgba(0,0,0,0.2);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:10;transition:all 0.2s;opacity:0;pointer-events:none}
+        .scroll-btn.visible{opacity:1;pointer-events:all}
     </style>
 </head>
 <body>
     <div id="login-screen" class="screen active">
-        <div class="container">
+        <div class="container" style="display:flex;flex-direction:column;justify-content:center;align-items:center;padding:32px">
             <div class="logo">💬</div>
             <div class="title">Messages</div>
             <div class="subtitle">Безопасный мессенджер</div>
-            <div class="input-group"><input type="email" id="login-email" placeholder="Email" autocomplete="email"></div>
-            <div class="input-group"><input type="password" id="login-password" placeholder="Пароль" autocomplete="current-password"></div>
-            <div class="error" id="login-error"></div>
-            <button class="btn btn-primary" onclick="login()">Войти</button>
-            <button class="btn btn-secondary" onclick="register()">Создать аккаунт</button>
+            <!-- Табы входа/регистрации -->
+            <div class="auth-tabs">
+                <button class="auth-tab active" id="tab-login" onclick="switchAuthTab('login')">Войти</button>
+                <button class="auth-tab" id="tab-register" onclick="switchAuthTab('register')">Создать аккаунт</button>
+            </div>
+            <!-- Форма входа -->
+            <div id="auth-login-form">
+                <div class="input-group"><input type="email" id="login-email" placeholder="Email" autocomplete="email"></div>
+                <div class="input-group" style="position:relative">
+                    <input type="password" id="login-password" placeholder="Пароль" autocomplete="current-password">
+                    <button class="pw-toggle" onclick="togglePw('login-password',this)">👁</button>
+                </div>
+                <div class="error" id="login-error"></div>
+                <button class="btn btn-primary" onclick="login()">Войти</button>
+            </div>
+            <!-- Форма регистрации -->
+            <div id="auth-register-form" style="display:none;width:100%;max-width:340px">
+                <div class="input-group"><input type="email" id="reg-email" placeholder="Email" autocomplete="email"></div>
+                <div class="input-group"><input type="text" id="reg-nickname" placeholder="Имя (никнейм)"></div>
+                <div class="input-group" style="position:relative">
+                    <input type="password" id="reg-password" placeholder="Пароль" autocomplete="new-password">
+                    <button class="pw-toggle" onclick="togglePw('reg-password',this)">👁</button>
+                </div>
+                <div class="input-group" style="position:relative">
+                    <input type="password" id="reg-password2" placeholder="Повторите пароль">
+                    <button class="pw-toggle" onclick="togglePw('reg-password2',this)">👁</button>
+                </div>
+                <div class="password-strength" id="pw-strength"></div>
+                <div class="error" id="reg-error"></div>
+                <button class="btn btn-primary" onclick="registerNewUser()">Создать аккаунт</button>
+            </div>
         </div>
     </div>
     
@@ -860,6 +973,12 @@ app.get('/', (req, res) => {
                 <button class="nav-call-btn" onclick="showScreen('settings')" style="font-size:20px">⚙️</button>
             </div>
         </div>
+        <div class="search-bar">
+            <div class="search-bar-wrap">
+                <span class="search-bar-icon">🔍</span>
+                <input type="text" placeholder="Поиск по чатам..." id="chats-search" oninput="filterChats(this.value)">
+            </div>
+        </div>
         <div class="container" id="chats-list"></div>
         <button class="fab create-group" onclick="createGroup()" title="Создать группу">👥</button>
         <button class="fab" onclick="showNewChatModal()" title="Новый чат">+</button>
@@ -877,7 +996,10 @@ app.get('/', (req, res) => {
                 <button class="nav-group-info-btn" id="chat-group-info-btn" onclick="showGroupInfo()" title="Инфо группы" style="display:none">ℹ️</button>
             </div>
         </div>
-        <div class="messages" id="chat-messages"></div>
+        <div style="position:relative;flex:1;display:flex;flex-direction:column;min-height:0">
+            <div class="messages" id="chat-messages" onscroll="onChatScroll()"></div>
+            <button class="scroll-btn" id="scroll-btn" onclick="scrollToBottom()">↓</button>
+        </div>
         <div class="typing-indicator" id="typing-indicator" style="display:none">
             <div class="typing-dots"><span></span><span></span><span></span></div>
             <span id="typing-text">печатает...</span>
@@ -953,6 +1075,16 @@ app.get('/', (req, res) => {
         </div>
     </div>
     
+    <!-- Модал пересылки -->
+    <div class="modal" id="forward-modal">
+        <div class="modal-content">
+            <div class="modal-handle"></div>
+            <div class="modal-title">Переслать сообщение</div>
+            <div class="forward-modal-list" id="forward-list"></div>
+            <button class="btn btn-secondary" onclick="closeModal('forward-modal')" style="margin-top:12px">Отмена</button>
+        </div>
+    </div>
+
     <div class="call-overlay" id="call-overlay">
         <div class="call-avatar" id="call-avatar">👤</div>
         <div class="call-name" id="call-name"></div>
@@ -1113,6 +1245,20 @@ app.get('/', (req, res) => {
             socket.on('addedToGroup', (data) => {
                 loadContacts();
                 showToast('Вас добавили в группу!');
+            });
+
+            socket.on('messageReactions', (data) => {
+                const el = document.getElementById('reactions-' + data.msgId);
+                if (!el) return;
+                const counts = {};
+                (data.reactions || []).forEach(r => {
+                    counts[r.emoji] = (counts[r.emoji] || { count: 0, mine: false });
+                    counts[r.emoji].count++;
+                    if (r.user === myEmail) counts[r.emoji].mine = true;
+                });
+                el.innerHTML = Object.entries(counts).map(([emoji, d]) =>
+                    \`<span class="reaction-chip\${d.mine ? ' mine' : ''}" onclick="socket.emit('messageReaction',{msgId:'\${data.msgId}',emoji:'\${emoji}'})">\${emoji} \${d.count}</span>\`
+                ).join('');
             });
         }
         
@@ -1276,10 +1422,19 @@ app.get('/', (req, res) => {
                     container.appendChild(div);
                 });
             }
-            
+
+            // Мёржим контакты с сервера + локально сохранённые (открытые, но без сообщений)
+            const serverEmails = new Set(data.contacts.map(c => c.email));
+            const savedLocally = getSavedContacts().filter(c => !serverEmails.has(c.email));
+            // savedLocally показываем как "без сообщений" контакты
+            const allContacts = [
+                ...data.contacts,
+                ...savedLocally.map(c => ({ ...c, hasMessages: false, lastMessage: null, online: false }))
+            ];
+
             // Чаты (те у кого есть сообщения)
-            const activeChats = data.contacts.filter(c => c.hasMessages);
-            const otherChats = data.contacts.filter(c => !c.hasMessages);
+            const activeChats = allContacts.filter(c => c.hasMessages);
+            const otherChats = allContacts.filter(c => !c.hasMessages);
             
             if (activeChats.length > 0) {
                 const sectionTitle = document.createElement('div');
@@ -1397,6 +1552,8 @@ app.get('/', (req, res) => {
             if (data.error) {
                 document.getElementById('search-error').textContent = data.error;
             } else if (data.found) {
+                // Запоминаем найденного пользователя сразу при поиске
+                rememberContact(data.email, data.nickname, data.avatar, data.status);
                 document.getElementById('search-result').innerHTML = \`
                     <div class="chat-item" onclick="openChat('\${data.email}');closeModal('new-chat-modal')">
                         <div class="avatar">\${data.avatar ? '<img src="'+data.avatar+'">' : '👤'}</div>
@@ -1505,6 +1662,18 @@ app.get('/', (req, res) => {
         }
         
         // ========== ЧАТ ==========
+
+        // Запоминаем контакт локально — чтобы он оставался в списке даже без сообщений
+        function rememberContact(email, nickname, avatar, status) {
+            let saved = JSON.parse(localStorage.getItem('savedContacts') || '{}');
+            saved[email] = { email, nickname: nickname || email, avatar: avatar || null, status: status || '', savedAt: Date.now() };
+            localStorage.setItem('savedContacts', JSON.stringify(saved));
+        }
+
+        function getSavedContacts() {
+            return Object.values(JSON.parse(localStorage.getItem('savedContacts') || '{}'));
+        }
+
         async function openChat(email) {
             currentChat = email;
             currentGroup = null;
@@ -1516,6 +1685,9 @@ app.get('/', (req, res) => {
             document.getElementById('chat-group-info-btn').style.display = 'none';
             document.getElementById('message-input').value = '';
             
+            // Запоминаем чат сразу, до загрузки — он точно появится в списке при возврате
+            rememberContact(email);
+
             updateChatHeader(email);
             await loadMessages();
             scrollToBottom();
@@ -1542,6 +1714,8 @@ app.get('/', (req, res) => {
             if (data.chatUser) {
                 document.getElementById('chat-user-name').textContent = data.chatUser.nickname || email;
                 document.getElementById('chat-user-status').textContent = data.chatUser.online ? 'онлайн' : 'был(а) недавно';
+                // Обновляем локальный кэш с актуальными данными (имя, аватар, статус)
+                rememberContact(email, data.chatUser.nickname, data.chatUser.avatar, data.chatUser.status);
             }
         }
         
@@ -1597,23 +1771,39 @@ app.get('/', (req, res) => {
                 senderHtml = '<div class="group-message-sender">' + (sender) + '</div>';
             }
             
+            const replyHtml = msg.replyTo
+                ? '<div style="border-left:2px solid #0a84ff;padding:2px 6px;font-size:11px;opacity:0.7;margin-bottom:4px;border-radius:0 4px 4px 0">↩ ' + escapeHtml((msg.replyTo+'').slice(0,50)) + '</div>'
+                : '';
+
             row.innerHTML = \`
                 \${senderHtml}
-                <div class="message-bubble \${bubbleClass}">\${bubbleText}</div>
+                <div class="message-bubble \${bubbleClass}" data-msgid="\${msg.id}" data-mine="\${isMine}">
+                    \${replyHtml}\${bubbleText}
+                </div>
+                <div class="msg-reactions" id="reactions-\${msg.id}"></div>
                 <div class="message-time">
                     \${formatTime(msg.time)}
-                    \${msg.edited ? '<span class="edited-label">изм.</span>' : ''}
+                    \${!isMine && !isSystem ? '<span style="cursor:pointer;opacity:0.5;margin-left:4px" data-react="' + msg.id + '">😊</span>' : ''}
                 </div>
                 <div class="message-read-status" id="read-status-\${msg.id}">
                     \${getReadStatus(msg)}
                 </div>
-                \${isMine && !isSystem ? \`
-                    <div class="message-actions">
-                        <button class="action-btn" onclick="startEditMessage('\${msg.id}','\${escapeHtml(bubbleText)}')">✎</button>
-                        <button class="action-btn" onclick="deleteMessage('\${msg.id}')">✕</button>
-                    </div>
-                \` : ''}
             \`;
+
+            // Навешиваем события после innerHTML
+            const bubble = row.querySelector('.message-bubble');
+            if (bubble) {
+                const bText = bubbleText;
+                const bId = msg.id;
+                const bMine = isMine;
+                bubble.addEventListener('contextmenu', e => { e.preventDefault(); showMsgContext(e, bId, bText, bMine); });
+                bubble.addEventListener('dblclick', () => startReply(bId, bText));
+            }
+            const reactBtn = row.querySelector('[data-react]');
+            if (reactBtn) {
+                const bId = msg.id;
+                reactBtn.addEventListener('click', e => showReactionPicker(e, bId));
+            }
             
             container.appendChild(row);
             scrollToBottom();
@@ -1664,18 +1854,21 @@ app.get('/', (req, res) => {
                 socket.emit('groupMessage', {
                     groupId: currentGroup,
                     text,
-                    time: Date.now()
+                    time: Date.now(),
+                    replyTo: replyToText || null
                 });
             } else if (currentChat) {
                 socket.emit('message', {
                     to: currentChat,
                     text,
-                    time: Date.now()
+                    time: Date.now(),
+                    replyTo: replyToText || null
                 });
             }
             
             input.value = '';
             document.getElementById('effects-bar').style.display = 'none';
+            cancelReply();
         }
         
         function sendEffect(emoji, type) {
@@ -2222,6 +2415,224 @@ app.get('/', (req, res) => {
             });
         });
         
+        // ========== АВТОРИЗАЦИЯ — ВКЛАДКИ И РЕГИСТРАЦИЯ ==========
+        function switchAuthTab(tab) {
+            document.getElementById('auth-login-form').style.display = tab === 'login' ? 'block' : 'none';
+            document.getElementById('auth-register-form').style.display = tab === 'register' ? 'block' : 'none';
+            document.getElementById('tab-login').classList.toggle('active', tab === 'login');
+            document.getElementById('tab-register').classList.toggle('active', tab === 'register');
+            document.getElementById('login-error').textContent = '';
+            document.getElementById('reg-error').textContent = '';
+        }
+
+        function togglePw(inputId, btn) {
+            const inp = document.getElementById(inputId);
+            if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🙈'; }
+            else { inp.type = 'password'; btn.textContent = '👁'; }
+        }
+
+        // Индикатор силы пароля
+        document.addEventListener('DOMContentLoaded', () => {
+            const pwInput = document.getElementById('reg-password');
+            if (pwInput) pwInput.addEventListener('input', () => updatePwStrength(pwInput.value));
+        });
+
+        function updatePwStrength(pw) {
+            const bar = document.getElementById('pw-strength');
+            if (!bar) return;
+            let score = 0;
+            if (pw.length >= 6) score++;
+            if (pw.length >= 10) score++;
+            if (/[A-Z]/.test(pw)) score++;
+            if (/[0-9]/.test(pw)) score++;
+            if (/[^A-Za-z0-9]/.test(pw)) score++;
+            const colors = ['','#ff453a','#ff9f0a','#ffd60a','#30d158'];
+            const widths = ['0%','20%','40%','70%','100%'];
+            bar.innerHTML = \`<div class="pw-bar" style="width:\${widths[score]};background:\${colors[score]}"></div>\`;
+        }
+
+        async function registerNewUser() {
+            const email = document.getElementById('reg-email').value.trim();
+            const nickname = document.getElementById('reg-nickname').value.trim();
+            const password = document.getElementById('reg-password').value;
+            const password2 = document.getElementById('reg-password2').value;
+            const errEl = document.getElementById('reg-error');
+            errEl.textContent = '';
+
+            if (!email || !password || !nickname) { errEl.textContent = 'Заполните все поля'; return; }
+            if (password !== password2) { errEl.textContent = 'Пароли не совпадают'; return; }
+            if (password.length < 6) { errEl.textContent = 'Пароль минимум 6 символов'; return; }
+
+            const data = await request('/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password, nickname })
+            });
+
+            if (data.error) {
+                errEl.textContent = data.error;
+            } else {
+                errEl.className = 'success';
+                errEl.textContent = 'Код отправлен в Telegram!';
+                localStorage.setItem('pendingEmail', email);
+                setTimeout(() => showScreen('2fa'), 1200);
+            }
+        }
+
+        // ========== ПОИСК ПО ЧАТАМ ==========
+        let allContactsCache = [];
+
+        function filterChats(query) {
+            const q = query.toLowerCase().trim();
+            const items = document.querySelectorAll('#chats-list .chat-item');
+            items.forEach(item => {
+                const text = item.textContent.toLowerCase();
+                item.style.display = (!q || text.includes(q)) ? '' : 'none';
+            });
+        }
+
+        // ========== КОНТЕКСТНОЕ МЕНЮ СООБЩЕНИЙ ==========
+        let ctxMsgId = null;
+        let ctxMsgText = null;
+
+        function showMsgContext(e, msgId, msgText, isMine) {
+            e.preventDefault();
+            e.stopPropagation();
+            ctxMsgId = msgId;
+            ctxMsgText = msgText;
+
+            const existing = document.getElementById('ctx-menu');
+            if (existing) existing.remove();
+
+            const menu = document.createElement('div');
+            menu.id = 'ctx-menu';
+            menu.className = 'ctx-menu';
+
+            const items = [
+                { icon: '📋', label: 'Копировать', fn: () => { navigator.clipboard.writeText(msgText); showToast('Скопировано'); } },
+                { icon: '↩️', label: 'Ответить', fn: () => startReply(msgId, msgText) },
+                { icon: '➡️', label: 'Переслать', fn: () => openForwardModal(msgId, msgText) },
+                { divider: true },
+            ];
+
+            if (isMine) {
+                items.push({ icon: '✏️', label: 'Изменить', fn: () => startEditMessage(msgId, msgText) });
+                items.push({ icon: '🗑', label: 'Удалить', fn: () => deleteMessage(msgId), danger: true });
+            }
+
+            items.forEach(item => {
+                if (item.divider) {
+                    const d = document.createElement('div');
+                    d.className = 'ctx-divider';
+                    menu.appendChild(d);
+                    return;
+                }
+                const el = document.createElement('div');
+                el.className = 'ctx-item' + (item.danger ? ' danger' : '');
+                el.innerHTML = \`<span>\${item.icon}</span>\${item.label}\`;
+                el.onclick = () => { menu.remove(); item.fn(); };
+                menu.appendChild(el);
+            });
+
+            const x = Math.min(e.clientX, window.innerWidth - 200);
+            const y = Math.min(e.clientY, window.innerHeight - menu.offsetHeight - 20);
+            menu.style.left = x + 'px';
+            menu.style.top = y + 'px';
+            document.body.appendChild(menu);
+
+            setTimeout(() => {
+                document.addEventListener('click', () => menu.remove(), { once: true });
+            }, 50);
+        }
+
+        // ========== ОТВЕТ НА СООБЩЕНИЕ ==========
+        let replyToId = null;
+        let replyToText = null;
+
+        function startReply(msgId, msgText) {
+            replyToId = msgId;
+            replyToText = msgText;
+            let bar = document.getElementById('reply-bar');
+            if (!bar) {
+                bar = document.createElement('div');
+                bar.id = 'reply-bar';
+                bar.className = 'forward-bar';
+                const inputBar = document.getElementById('message-input-bar');
+                inputBar.parentNode.insertBefore(bar, inputBar);
+            }
+            bar.innerHTML = \`<span style="color:var(--text-secondary);font-size:12px">↩ \${msgText.slice(0,40)}\${msgText.length>40?'…':''}</span><button style="background:0;border:0;color:var(--text-secondary);font-size:18px;cursor:pointer" onclick="cancelReply()">✕</button>\`;
+            document.getElementById('message-input').focus();
+        }
+
+        function cancelReply() {
+            replyToId = null;
+            replyToText = null;
+            const bar = document.getElementById('reply-bar');
+            if (bar) bar.remove();
+        }
+
+        // ========== ПЕРЕСЫЛКА ==========
+        let forwardMsgText = null;
+
+        function openForwardModal(msgId, msgText) {
+            forwardMsgText = msgText;
+            const list = document.getElementById('forward-list');
+            const saved = Object.values(JSON.parse(localStorage.getItem('savedContacts') || '{}'));
+            list.innerHTML = saved.length ? '' : '<div style="padding:20px;text-align:center;color:var(--text-secondary)">Нет контактов</div>';
+            saved.forEach(c => {
+                const el = document.createElement('div');
+                el.className = 'forward-item';
+                el.innerHTML = \`<div class="avatar" style="width:40px;height:40px;font-size:18px">\${c.avatar ? '<img src="'+c.avatar+'">' : '👤'}</div><span>\${c.nickname || c.email}</span>\`;
+                el.onclick = () => {
+                    socket.emit('message', { to: c.email, text: '➡️ ' + forwardMsgText, time: Date.now() });
+                    closeModal('forward-modal');
+                    showToast('Переслано!');
+                };
+                list.appendChild(el);
+            });
+            document.getElementById('forward-modal').classList.add('active');
+        }
+
+        // ========== РЕАКЦИИ ==========
+        const REACTIONS = ['❤️','👍','😂','😮','😢','🔥'];
+
+        function showReactionPicker(e, msgId) {
+            e.stopPropagation();
+            const existing = document.getElementById('reaction-picker');
+            if (existing) existing.remove();
+
+            const picker = document.createElement('div');
+            picker.id = 'reaction-picker';
+            picker.className = 'reaction-picker';
+            REACTIONS.forEach(emoji => {
+                const btn = document.createElement('button');
+                btn.style.cssText = 'background:0;border:0;font-size:24px;cursor:pointer;padding:4px;transition:transform 0.1s';
+                btn.textContent = emoji;
+                btn.onmouseenter = () => btn.style.transform = 'scale(1.3)';
+                btn.onmouseleave = () => btn.style.transform = 'scale(1)';
+                btn.onclick = () => {
+                    socket.emit('messageReaction', { msgId, emoji });
+                    picker.remove();
+                };
+                picker.appendChild(btn);
+            });
+
+            const rect = e.target.getBoundingClientRect();
+            picker.style.left = Math.min(rect.left, window.innerWidth - 280) + 'px';
+            picker.style.top = (rect.top - 60) + 'px';
+            document.body.appendChild(picker);
+            setTimeout(() => document.addEventListener('click', () => picker.remove(), { once: true }), 50);
+        }
+
+        // ========== SCROLL TO BOTTOM ==========
+        function onChatScroll() {
+            const c = document.getElementById('chat-messages');
+            const btn = document.getElementById('scroll-btn');
+            if (!c || !btn) return;
+            const isNearBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 120;
+            btn.classList.toggle('visible', !isNearBottom);
+        }
+
         // ========== ЗАПУСК ==========
         init();
     </script>
