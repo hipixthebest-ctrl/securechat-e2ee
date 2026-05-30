@@ -1,77 +1,43 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require("socket.io");
-const crypto = require('crypto');
-const https = require('https');
+[...Оставьте всё как было выше до строки, где начинается app.get('/', ...)]
 
-const app = express();
-app.use(express.json({ limit: '50mb' }));
+// ========== HTML ==========
+app.get('/', (req, res) => {
+    res.send(`<!DOCTYPE html>
+<html lang="ru">
+<head>
+    ...
+</head>
+<body>
+    ...
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        // ВСЕ ПЕРЕМЕННЫЕ ...
 
-// Настройки Telegram бота
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || 'ТВОЙ_ТОКЕН_БОТА';
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || 'ТВОЙ_CHAT_ID';
-
-// Хранилища
-const users = new Map();
-const messages = [];
-const groups = new Map(); // groupId -> { id, name, avatar, members: Set, createdBy, created }
-const groupMessages = []; // [{ id, groupId, from, text, time, type, readBy: Set }]
-const sessions = new Map();
-const online = new Map();
-const callRequests = new Map();
-
-function sendToTelegram(code, email) {
-    if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID || 
-        TELEGRAM_BOT_TOKEN === 'ТВОЙ_ТОКЕН_БОТА' || 
-        TELEGRAM_CHAT_ID === 'ТВОЙ_CHAT_ID') {
-        console.log(`\n⚠️  Telegram бот не настроен. Код для ${email}: ${code}\n`);
-        return;
-    }
-    
-    const text = `🔐 *Messages 2FA*\n\n📧 Email: \`${email}\`\n🔑 Код: \`${code}\`\n⏰ ${new Date().toLocaleString('ru-RU')}`;
-    
-    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-    const data = JSON.stringify({
-        chat_id: TELEGRAM_CHAT_ID,
-        text: text,
-        parse_mode: 'Markdown'
-    });
-    
-    const options = {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(data)
+        // ========== ЭКРАНЫ ==========
+        function showScreen(screen) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            const screenMap = { 'login': 'login-screen', '2fa': '2fa-screen', 'chats': 'chats-screen', 'chat': 'chat-screen', 'settings': 'settings-screen' };
+            const screenId = screenMap[screen] || screen;
+            document.getElementById(screenId).classList.add('active');
+            if (screen === 'settings') loadSettingsUI();
         }
-    };
-    
-    const req = https.request(url, options, (res) => {
-        let body = '';
-        res.on('data', chunk => body += chunk);
-        res.on('end', () => {
-            try {
-                const result = JSON.parse(body);
-                if (result.ok) {
-                    console.log(`✅ Код для ${email} отправлен в Telegram`);
-                } else {
-                    console.log(`❌ Ошибка Telegram: ${result.description}`);
-                    console.log(`📧 Код для ${email}: ${code}`);
-                }
-            } catch(e) {
-                console.log(`📧 Код для ${email}: ${code}`);
-            }
-        });
-    });
-    
-    req.on('error', (err) => {
-        console.log(`❌ Ошибка Telegram API: ${err.message}`);
-        console.log(`📧 Код для ${email}: ${code}`);
-    });
-    
-    req.write(data);
-    req.end();
-}
 
-// ========== API ==========
+        // Исправленная goBack согласно вашему запросу
+        function goBack() {
+            // 1. Скрываем экран чата
+            document.getElementById('chat-screen').classList.remove('active');
+            // 2. Показываем список чатов (у вас chats-screen)
+            document.getElementById('chats-screen').classList.add('active');
+            // 3. Форсируем обновление контактов
+            loadContacts();
+        }
+
+        // === далее остальной фронтенд-скрипт ===
+        // ...
+    </script>
+</body>
+</html>`);
+});
+
 // ...
-// --- остальной код до строки 1129 не изменяется ---
+// Всё остальное без изменений
