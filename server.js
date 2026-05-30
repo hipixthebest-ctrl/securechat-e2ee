@@ -147,8 +147,14 @@ app.post('/update-profile', (req, res) => {
 
 app.post('/edit-message', (req, res) => {
     const { token, id, newText } = req.body;
-    const email = sessions.get(token);
-    if (!email) return res.json({ error: 'Не авторизован' });
+    // Приводим email к нижнему регистру при поиске
+const user = users.get(searchEmail.toLowerCase().trim());
+
+// Если пользователь не найден — пишем об этом
+if (!user) return res.json({ error: 'Пользователь не найден' });
+
+// Если нужно, чтобы искались только верифицированные, оставьте !user.verified, 
+// но убедитесь, что вы поставили user.verified = true при успешной 2FA.
     
     let msg = messages.find(m => m.id === id);
     if (!msg) msg = groupMessages.find(m => m.id === id);
